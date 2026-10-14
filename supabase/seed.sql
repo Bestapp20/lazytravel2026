@@ -1,0 +1,37 @@
+-- Optional demo seed. Run AFTER you have an authenticated user:
+--   select id, email from auth.users;
+-- Then replace the UUID below and execute in the SQL editor.
+--
+-- do $$
+-- declare
+--   uid uuid := 'YOUR_USER_UUID';
+--   tid uuid;
+--   d1 uuid;
+--   d2 uuid;
+-- begin
+--   insert into public.trips (owner_id, title, destinations, start_date, end_date, travelers, companion_type, pace, budget_tier, budget_total, status)
+--   values (
+--     uid,
+--     'Barcelona',
+--     '[{"city":"Barcelona","country":"Spain","flag":"🇪🇸"}]'::jsonb,
+--     '2026-06-12',
+--     '2026-06-18',
+--     2, 'couple', 'balanced', 'mid', 10000, 'planned'
+--   )
+--   returning id into tid;
+--
+--   insert into public.days (trip_id, day_index, date, title)
+--   values (tid, 1, '2026-06-12', 'יום ראשון — ברצלונה')
+--   returning id into d1;
+--
+--   insert into public.items (trip_id, day_id, place_name, category, address, lat, lng, start_time, duration_minutes, sort_order, ai_tip, rating, map_link)
+--   values (
+--     tid, d1, 'La Sagrada Família', 'attraction',
+--     'Carrer de Mallorca, 401, Barcelona', 41.4036, 2.1744,
+--     '09:00', 120, 0,
+--     'הגיעו לפני 9:00 כדי להימנע מהתורים',
+--     4.8,
+--     'https://maps.google.com/?q=41.4036,2.1744'
+--   );
+-- end $$;
+select 1;

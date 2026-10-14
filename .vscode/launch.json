@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "lazy_travel",
+      "request": "launch",
+      "type": "dart",
+      "args": [
+        "--dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co",
+        "--dart-define=SUPABASE_ANON_KEY=YOUR_ANON_KEY"
+      ]
+    }
+  ]
+}

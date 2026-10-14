@@ -1,0 +1,52 @@
+project_id = "lazytravel"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "io.lazytravel.app://login-callback/"
+additional_redirect_urls = ["io.lazytravel.app://login-callback/"]
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+double_confirm_changes = true
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[functions.generate-route]
+verify_jwt = true
+
+[functions.places-autocomplete]
+verify_jwt = true
+
+[functions.places-search]
+verify_jwt = true
+
+[functions.places-photo]
+verify_jwt = true
+
+[functions.invite-member]
+verify_jwt = true
+
+[functions.suggest-points]
+verify_jwt = true
+
+[functions.reorder-day]
+verify_jwt = true
