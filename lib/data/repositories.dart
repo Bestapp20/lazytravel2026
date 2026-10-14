@@ -111,12 +111,12 @@ class TripsRepository {
         .from('days')
         .select()
         .eq('trip_id', tripId)
-        .order('day_index');
+        .order('day_index', ascending: true);
     final items = await _client
         .from('items')
         .select()
         .eq('trip_id', tripId)
-        .order('sort_order');
+        .order('sort_order', ascending: true);
     final byDay = <String, List<TripItem>>{};
     for (final r in items as List) {
       final it = TripItem.fromMap(Map<String, dynamic>.from(r as Map));
