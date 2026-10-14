@@ -83,6 +83,20 @@ export function photoUrl(photoReference: string, maxwidth = 800): string {
   return `${PLACES_NEW}/${photoReference}/media?maxWidthPx=${maxwidth}&key=${key()}`;
 }
 
+/** Resolve a photo name to a short-lived public googleusercontent URL (no API key inside). */
+export async function photoMediaUri(photoReference: string, maxwidth = 800): Promise<string | null> {
+  try {
+    const res = await fetch(`${PLACES_NEW}/${photoReference}/media?maxWidthPx=${maxwidth}&skipHttpRedirect=true`, {
+      headers: { "X-Goog-Api-Key": key() },
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return (d.photoUri as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function mapResult(r: Record<string, any>): PlaceHit {
   const lat = r.location?.latitude;
   const lng = r.location?.longitude;

@@ -17,8 +17,8 @@ port = 54323
 
 [auth]
 enabled = true
-site_url = "io.lazytravel.app://login-callback/"
-additional_redirect_urls = ["io.lazytravel.app://login-callback/"]
+site_url = "com.lazytravel.lazytravel://login-callback/"
+additional_redirect_urls = ["com.lazytravel.lazytravel://login-callback/"]
 enable_signup = true
 
 [auth.email]

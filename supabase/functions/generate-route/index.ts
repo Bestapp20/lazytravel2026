@@ -1,5 +1,5 @@
 import { json, optionsResponse } from "../_shared/cors.ts";
-import { INTEREST_QUERIES, PlaceHit, textSearch } from "../_shared/places.ts";
+import { INTEREST_QUERIES, PlaceHit, photoMediaUri, textSearch } from "../_shared/places.ts";
 import { serviceClient, userClient } from "../_shared/supabase.ts";
 
 type Destination = {
@@ -193,6 +193,66 @@ async function planWithLlm(
   return (parsed.days ?? []) as LlmDay[];
 }
 
+const DURATION: Record<string, number> = {
+  museum: 120, food: 75, nature: 90, shopping: 60, nightlife: 120, hotel: 30, attraction: 75,
+};
+const TIPS: Record<string, string[]> = {
+  museum: ["כדאי להזמין כרטיסים מראש באתר הרשמי כדי לדלג על התור", "בדקו ימים עם כניסה חינם או מוזלת"],
+  food: ["מומלץ להזמין מקום מראש, במיוחד בערב", "שאלו על מנת היום — לרוב משתלמת יותר"],
+  nature: ["הגיעו מוקדם לאור טוב ופחות אנשים", "קחו מים וכובע"],
+  shopping: ["השוו מחירים לפני קנייה ובקשו החזר מע״מ (Tax Free)"],
+  nightlife: ["בדקו קוד לבוש ושעות פתיחה לפני שיוצאים"],
+  attraction: ["הגיעו מוקדם בבוקר כדי להימנע מעומס", "שווה לצלם מהזווית הפחות מוכרת — שאלו את המקומיים", "שמרו על חפצי ערך באזורים הומי תיירים"],
+  hotel: ["השאירו מזוודות בקבלה אם החדר עוד לא מוכן"],
+};
+
+function fmt(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+/** Non-AI plan: spread places across days, no back-to-back restaurants, lunch/dinner placement, varied durations. */
+function fallbackPlan(p: Payload, days: number, candidates: PlaceHit[]): LlmDay[] {
+  const food = candidates.filter((c) => categoryFromTypes(c.types) === "food");
+  const sights = candidates.filter((c) => categoryFromTypes(c.types) !== "food");
+  const pace = p.pace ?? "balanced";
+  const sightsPerDay = pace === "relaxed" ? 2 : pace === "intense" ? 4 : 3;
+  const out: LlmDay[] = [];
+  let tipN = 0;
+  for (let d = 0; d < days; d++) {
+    const daySights = sights.slice(d * sightsPerDay, d * sightsPerDay + sightsPerDay);
+    const dayFood = food.slice(d * 2, d * 2 + 2);
+    // order: sight, sight, lunch, sight(s), dinner — never two food stops in a row
+    const seq: PlaceHit[] = [];
+    daySights.forEach((s, i) => {
+      seq.push(s);
+      if (i === 1 && dayFood[0]) seq.push(dayFood[0]);
+    });
+    if (daySights.length < 2 && dayFood[0]) seq.push(dayFood[0]);
+    if (dayFood[1] && categoryFromTypes(seq[seq.length - 1]?.types) !== "food") seq.push(dayFood[1]);
+    let t = 9 * 60 + (d % 2) * 30;
+    const items: LlmItem[] = seq.map((c, i) => {
+      const cat = categoryFromTypes(c.types);
+      if (cat === "food" && i > 0 && t < 12 * 60 + 30 && i <= 3) t = Math.max(t, 12 * 60 + 30);
+      if (cat === "food" && i === seq.length - 1 && i > 2) t = Math.max(t, 19 * 60);
+      const dur = (DURATION[cat] ?? 75) + ((c.rating ?? 4) >= 4.6 && cat !== "food" ? 30 : 0);
+      const tips = TIPS[cat] ?? TIPS.attraction;
+      const item: LlmItem = {
+        place_id: c.place_id,
+        start_time: fmt(t),
+        end_time: fmt(t + dur),
+        duration_minutes: dur,
+        category: cat,
+        ai_tip: tips[tipN++ % tips.length],
+      };
+      t += dur + 25; // travel buffer
+      t = Math.ceil(t / 15) * 15;
+      return item;
+    });
+    out.push({ day_index: d + 1, title: `${p.destination.city} — יום ${d + 1}`, items });
+  }
+  return out;
+}
+
 async function maybeWeather(lat?: number, lng?: number, days = 1) {
   const key = Deno.env.get("WEATHER_API_KEY");
   if (!key || lat == null || lng == null) return null;
@@ -227,18 +287,7 @@ Deno.serve(async (req) => {
       plan = await planWithLlm(payload, daysN, candidates);
     } catch (e) {
       console.error("LLM failed, using fallback clusters", e);
-      const perDay = Math.max(3, Math.min(5, Math.ceil(candidates.length / daysN)));
-      plan = Array.from({ length: daysN }, (_, i) => ({
-        day_index: i + 1,
-        title: `${payload.destination.city} — יום ${i + 1}`,
-        items: candidates.slice(i * perDay, i * perDay + perDay).map((c, idx) => ({
-          place_id: c.place_id,
-          start_time: `${String(9 + idx * 2).padStart(2, "0")}:00`,
-          duration_minutes: 90,
-          category: categoryFromTypes(c.types),
-          ai_tip: "הוסף הערה אישית למקום",
-        })),
-      }));
+      plan = fallbackPlan(payload, daysN, candidates);
     }
 
     const byId = new Map(candidates.map((c) => [c.place_id, c]));
@@ -247,6 +296,16 @@ Deno.serve(async (req) => {
       payload.hotel?.lng ?? payload.destination.lng,
       daysN,
     );
+
+    // Resolve real place photos (public URIs, no API key on the client).
+    const usedIds = new Set(plan.flatMap((d) => d.items.map((i) => i.place_id)));
+    const photoById = new Map<string, string>();
+    await Promise.all([...usedIds].map(async (id) => {
+      const ref = byId.get(id)?.photo_reference;
+      if (!ref) return;
+      const uri = await photoMediaUri(ref);
+      if (uri) photoById.set(id, uri);
+    }));
 
     const admin = serviceClient();
     const dests = [payload.destination, ...(payload.extra_cities ?? [])];
@@ -319,6 +378,7 @@ Deno.serve(async (req) => {
           lng: place.lng,
           map_link: place.map_link,
           start_time: it.start_time || null,
+          end_time: it.end_time || null,
           duration_minutes: duration,
           sort_order: s,
           notes: it.notes ?? null,
@@ -326,6 +386,7 @@ Deno.serve(async (req) => {
           rating: place.rating,
           price_level: place.price_level,
           photo_reference: place.photo_reference,
+          photo_url: photoById.get(place.place_id) ?? null,
           estimated_cost: null,
         });
       }

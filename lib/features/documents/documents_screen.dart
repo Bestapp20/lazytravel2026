@@ -164,7 +164,9 @@ class DocumentsScreen extends ConsumerWidget {
       await ref.read(documentsRepositoryProvider)?.upload(
             tripId: tripId,
             file: file!,
-            title: title.text.trim().isEmpty ? 'מסמך' : title.text.trim(),
+            title: title.text.trim().isEmpty
+                ? file!.path.split(Platform.pathSeparator).last
+                : title.text.trim(),
             docType: type,
           );
       ref.invalidate(documentsProvider(tripId));

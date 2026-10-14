@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/config/app_config.dart';
 import 'models.dart';
 
 class AuthRepository {
@@ -31,7 +32,7 @@ class AuthRepository {
   Future<void> sendMagicLink(String email) {
     return _client.auth.signInWithOtp(
       email: email,
-      emailRedirectTo: 'io.lazytravel.app://login-callback/',
+      emailRedirectTo: AppConfig.redirectUrl,
     );
   }
 

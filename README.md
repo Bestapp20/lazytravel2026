@@ -30,7 +30,7 @@ Clean v2 hook: `lib/core/booking/booking_engine.dart` plus empty `bookings` tabl
    - `OPENAI_API_KEY` (optional `OPENAI_MODEL`, default `gpt-4o-mini`)
    - optional `WEATHER_API_KEY` (WeatherAPI.com)
 3. Auth email (magic link) working in the Supabase dashboard, plus redirect URL:
-   - `io.lazytravel.app://login-callback/`
+   - `com.lazytravel.lazytravel://login-callback/`
 4. Store accounts later (TestFlight / Play) — not required to run locally.
 
 The **anon key** is a public client key. Service role and Google/OpenAI keys stay in Edge Function secrets only.
@@ -74,7 +74,7 @@ Or paste `supabase/migrations/0001_init.sql` in the SQL editor. That migration c
 - private storage bucket **`trip-docs`** (path `{trip_id}/...`)
 - empty `bookings` table for v2
 
-Auth → URL config: add `io.lazytravel.app://login-callback/` to Redirect URLs. Disable email confirmations in local/dev if you want password sign-up without clicking a mail.
+Auth → URL config: add `com.lazytravel.lazytravel://login-callback/` to Redirect URLs. Disable email confirmations in local/dev if you want password sign-up without clicking a mail.
 
 Optional demo trip: see comments in `supabase/seed.sql`.
 
@@ -90,7 +90,7 @@ extracted-flutter/   Original 5 static screens (reference)
 
 ## Deep links
 
-- Android / iOS scheme: `io.lazytravel.app`
+- Android / iOS scheme: `com.lazytravel.lazytravel`
 - Host: `login-callback`
 
 Package / application id: `com.lazytravel.lazy_travel`.

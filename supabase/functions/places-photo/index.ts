@@ -1,5 +1,5 @@
 import { corsHeaders, json, optionsResponse } from "../_shared/cors.ts";
-import { photoUrl } from "../_shared/places.ts";
+import { photoMediaUri, photoUrl } from "../_shared/places.ts";
 import { userClient } from "../_shared/supabase.ts";
 
 Deno.serve(async (req) => {
@@ -10,6 +10,9 @@ Deno.serve(async (req) => {
     const ref = url.searchParams.get("ref") ?? "";
     const maxwidth = Number(url.searchParams.get("maxwidth") ?? "800");
     if (!ref) return json({ error: "missing ref" }, 400);
+    if (url.searchParams.get("uri") === "1") {
+      return json({ uri: await photoMediaUri(ref, maxwidth) });
+    }
     const upstream = await fetch(photoUrl(ref, maxwidth));
     const bytes = await upstream.arrayBuffer();
     return new Response(bytes, {

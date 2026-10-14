@@ -29,7 +29,7 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>io.lazytravel.app</string>
+				<string>com.lazytravel.lazytravel</string>
 			</array>
 		</dict>
 	</array>
