@@ -75,7 +75,7 @@ class AppBottomNav extends StatelessWidget {
     return Expanded(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => context.push('/wizard/step1'),
+        onTap: () => context.push('/finder'),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

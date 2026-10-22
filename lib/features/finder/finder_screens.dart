@@ -86,7 +86,12 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
   bool _anywhere = false;
   DateTimeRange? _range;
   String _dateMode = '3m'; // 1m | 3m | any | exact
-  String _bagMode = 'none'; // none | checked | carryon
+  String _bagMode = 'none'; // none | carryon | trolley | checked
+  final Set<String> _comps = {'flight', 'hotel', 'itinerary'};
+  double _budgetVal = 0; // 0 = no limit
+  bool get _hasF => _comps.contains('flight');
+  bool get _hasH => _comps.contains('hotel');
+  bool get _onlyItinerary => _comps.length == 1 && _comps.contains('itinerary');
 
   /// Effective date window: chips give rolling windows from tomorrow; 'exact' uses the picker.
   DateTimeRange? get _window {
@@ -127,6 +132,12 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
     if (client == null || win == null) return;
     // No destination typed = anywhere (a budget-only search must work).
     final anywhere = _anywhere || _dest.text.trim().isEmpty;
+    if (_comps.isEmpty) return;
+    if (anywhere && !_hasF) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('בלי טיסה צריך לבחור יעד')));
+      return;
+    }
+    if (_onlyItinerary) return _itineraryOnly(win);
     setState(() => _busy = true);
     try {
       final f = DateFormat('yyyy-MM-dd');
@@ -135,13 +146,14 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
         'destination': anywhere ? null : _dest.text.trim(),
         'date_from': f.format(win.start),
         'date_to': f.format(win.end),
-        'bag_mode': _bagMode,
+        'bag_mode': _hasF ? _bagMode : 'none',
+        'components': _comps.toList(),
         // Exact dates: the chosen range IS the trip.
         'nights_min': _dateMode == 'exact' && _range != null ? _range!.duration.inDays : _nights.start.round(),
         'nights_max': _dateMode == 'exact' && _range != null ? _range!.duration.inDays : _nights.end.round(),
         'adults': _adults,
         'children': _children,
-        'budget': num.tryParse(_budget.text.trim()),
+        'budget': _budgetVal > 0 ? _budgetVal.round() : null,
         'currency': 'ILS',
       });
       final id = (res.data as Map)['id'] as String?;
@@ -152,6 +164,95 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Itinerary only: no price search, straight to an AI route for the destination + dates.
+  Future<void> _itineraryOnly(DateTimeRange win) async {
+    final repo = ref.read(tripsRepositoryProvider);
+    if (repo == null) return;
+    final f = DateFormat('yyyy-MM-dd');
+    final start = win.start;
+    final end = _dateMode == 'exact' && _range != null ? _range!.end : start.add(Duration(days: _nights.start.round()));
+    setState(() => _busy = true);
+    final nav = Navigator.of(context);
+    nav.push(PageRouteBuilder(opaque: false, pageBuilder: (_, _, _) => const _RouteBuilding()));
+    try {
+      final id = await repo.generateRoute({
+        'destination': {'city': _dest.text.trim()},
+        'start_date': f.format(start),
+        'end_date': f.format(end),
+        'adults': _adults,
+        'kids': _children,
+        if (_budgetVal > 0) 'budget_total': _budgetVal.round(),
+        'currency': 'ILS',
+      });
+      ref.invalidate(tripsProvider);
+      if (mounted) {
+        nav.pop();
+        context.go('/trips/$id');
+      }
+    } catch (e) {
+      if (mounted) {
+        nav.pop();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('שגיאה: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _comp(String key, String emoji, String label) {
+    final on = _comps.contains(key);
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => on ? _comps.remove(key) : _comps.add(key)),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: on ? AppColors.accent.withValues(alpha: 0.12) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: on ? AppColors.accent : AppColors.border, width: on ? 2 : 1.5),
+          ),
+          child: Column(children: [
+            Text(emoji, style: const TextStyle(fontSize: 24)),
+            const SizedBox(height: 4),
+            Text(label, style: _t(13, w: FontWeight.w700, c: on ? AppColors.primaryDark : AppColors.textBody)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _budgetCard() {
+    final none = _budgetVal <= 0;
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [AppColors.accentLight, AppColors.accent, AppColors.primaryDark], begin: Alignment.topRight, end: Alignment.bottomLeft),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [BoxShadow(color: AppColors.accent.withValues(alpha: 0.3), blurRadius: 18, offset: const Offset(0, 6))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.savings_outlined, color: Colors.white),
+          const SizedBox(width: 8),
+          Text('תקציב כולל (₪)', style: _t(15, w: FontWeight.w700, c: Colors.white)),
+          const Spacer(),
+          if (!none)
+            GestureDetector(onTap: () => setState(() => _budgetVal = 0), child: Text('ללא הגבלה', style: _t(12, c: Colors.white70))),
+        ]),
+        const SizedBox(height: 6),
+        Text(none ? 'ללא הגבלה' : '₪${_money.format(_budgetVal.round())}', style: _t(34, w: FontWeight.w900, c: Colors.white)),
+        Text(none ? 'גרור כדי לקבוע תקרה לכל הטיול' : 'לכל ${_adults + _children} הנוסעים, ${[if (_hasF) 'טיסה', if (_hasH) 'מלון'].join(' + ')}',
+            style: _t(12, c: Colors.white.withValues(alpha: 0.85))),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(activeTrackColor: Colors.white, inactiveTrackColor: Colors.white30, thumbColor: Colors.white, overlayColor: Colors.white24, trackHeight: 5),
+          child: Slider(value: _budgetVal, min: 0, max: 40000, divisions: 80, onChanged: (v) => setState(() => _budgetVal = v)),
+        ),
+      ]),
+    );
   }
 
   Widget _label(String s) => Padding(
@@ -183,11 +284,22 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
       backgroundColor: AppColors.bgLight,
       body: Column(
         children: [
-          const _Header(title: 'מצא לי טיול', subtitle: 'הטיסה והמלון הזולים ביותר בתאריכים הגמישים שלך'),
+          const _Header(title: 'תכנן טיול', subtitle: 'טיסה, מלון ומסלול, בתאריכים הגמישים שלך'),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 30),
               children: [
+                _label('מה להכין לך?'),
+                Row(children: [
+                  _comp('flight', '✈️', 'טיסה'),
+                  const SizedBox(width: 8),
+                  _comp('hotel', '🏨', 'מלון'),
+                  const SizedBox(width: 8),
+                  _comp('itinerary', '🗺️', 'מסלול'),
+                ]),
+                const SizedBox(height: 8),
+                LtChip(label: '✨ טיול שלם', selected: _comps.length == 3, onTap: () => setState(() => _comps.addAll(['flight', 'hotel', 'itinerary']))),
+                if (!_onlyItinerary) _budgetCard(),
                 _label('לאן?'),
                 Row(children: [
                   LtChip(label: 'יעד מסוים', selected: !_anywhere, onTap: () => setState(() => _anywhere = false)),
@@ -198,8 +310,10 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
                   const SizedBox(height: 10),
                   TextField(controller: _dest, decoration: _dec('למשל: Koh Samui, Rome (ריק = לכל מקום)', Icons.place_outlined)),
                 ],
+                if (_hasF) ...[
                 _label('יוצאים מ'),
                 TextField(controller: _origin, decoration: _dec('קוד שדה/עיר, למשל TLV', Icons.flight_takeoff)),
+                ],
                 _label('חלון תאריכים'),
                 Wrap(spacing: 8, runSpacing: 8, children: [
                   LtChip(label: 'החודש הקרוב', selected: _dateMode == '1m', onTap: () => setState(() => _dateMode = '1m')),
@@ -212,13 +326,18 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
                     padding: const EdgeInsets.only(top: 6),
                     child: Text('${_d.format(_window!.start)} – ${_d.format(_window!.end)}', style: _t(12, c: AppColors.textBody)),
                   ),
+                if (_hasF) ...[
                 _label('כבודה'),
                 Wrap(spacing: 8, runSpacing: 8, children: [
                   LtChip(label: 'לא חשוב', selected: _bagMode == 'none', onTap: () => setState(() => _bagMode = 'none')),
-                  LtChip(label: '🧳 כולל מזוודה', selected: _bagMode == 'checked', onTap: () => setState(() => _bagMode = 'checked')),
                   LtChip(label: '🎒 תיק עלייה בלבד', selected: _bagMode == 'carryon', onTap: () => setState(() => _bagMode = 'carryon')),
+                  LtChip(label: '🧳 טרולי', selected: _bagMode == 'trolley', onTap: () => setState(() => _bagMode = 'trolley')),
+                  LtChip(label: '🛄 כולל מזוודה', selected: _bagMode == 'checked', onTap: () => setState(() => _bagMode = 'checked')),
                 ]),
-                if (_bagMode != 'none')
+                if (_bagMode == 'trolley')
+                  Padding(padding: const EdgeInsets.only(top: 6), child: Text('טרולי = תיק עלייה למטוס 8–10 ק״ג, בנוסף לפריט האישי', style: _t(12, c: AppColors.textBody))),
+                ],
+                if (_hasF && _bagMode != 'none')
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text('נבדוק מחיר חי כולל כבודה לתאריכים הזולים (לוקח עוד כמה שניות)', style: _t(12, c: AppColors.textBody)),
@@ -244,13 +363,11 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
                     _stepper('ילדים', _children, (v) => setState(() => _children = v)),
                   ]),
                 ),
-                _label('תקציב כולל (₪, לא חובה)'),
-                TextField(controller: _budget, keyboardType: TextInputType.number, decoration: _dec('למשל 12000', Icons.savings_outlined)),
                 const SizedBox(height: 28),
                 LtPrimaryButton(
-                  label: _busy ? 'מחפש...' : 'חפש לי טיול',
-                  icon: Icons.search,
-                  onPressed: _busy || _window == null ? null : _submit,
+                  label: _busy ? 'מחפש...' : _onlyItinerary ? 'בנה לי מסלול' : _comps.length == 3 ? 'מצא לי טיול שלם' : 'חפש לי ${[if (_hasF) 'טיסה', if (_hasH) 'מלון'].join(' + ')}',
+                  icon: _onlyItinerary ? Icons.auto_awesome : Icons.search,
+                  onPressed: _busy || _window == null || _comps.isEmpty ? null : _submit,
                 ),
               ],
             ),
@@ -430,6 +547,8 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     }
   }
 
+  bool get _withItinerary => ((_search?['components'] as List?) ?? const ['itinerary']).contains('itinerary');
+
   Future<void> _createTrip() async {
     if (_creating || _busy) return;
     final o = _offer!;
@@ -445,7 +564,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
         'kids': (_search?['children'] as num?)?.toInt() ?? 0,
         'budget_total': o['total'],
         'currency': o['currency'] ?? 'ILS',
-        'hotel': {'name': o['hotel_name'], 'address': o['hotel_address']},
+        if (o['hotel_name'] != null) 'hotel': {'name': o['hotel_name'], 'address': o['hotel_address']},
         if ((o['flight'] as Map?)?['origin'] != null) 'origin_city': (o['flight'] as Map)['origin'],
       });
       ref.invalidate(tripsProvider);
@@ -481,7 +600,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     return Scaffold(
       backgroundColor: AppColors.bgLight,
       body: CustomScrollView(slivers: [
-        SliverToBoxAdapter(child: _Header(title: o['hotel_name'] ?? '', subtitle: o['destination'])),
+        SliverToBoxAdapter(child: _Header(title: o['hotel_name'] ?? o['destination'] ?? '', subtitle: o['hotel_name'] == null ? null : o['destination'])),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
           sliver: SliverList.list(children: [
@@ -559,7 +678,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
                 ]),
               ),
             const SizedBox(height: 14),
-            LtCard(
+            if (o['hotel_id'] != null) LtCard(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   const Icon(Icons.hotel, color: AppColors.accent),
@@ -585,8 +704,8 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
               ]),
             ),
             const SizedBox(height: 20),
-            LtSecondaryButton(
-              label: _creating ? 'יוצר טיול... (עד דקה)' : 'צור טיול מההצעה',
+            if (_withItinerary) LtSecondaryButton(
+              label: _creating ? 'בונה מסלול... (עד דקה)' : '🗺️ צור טיול עם מסלול מההצעה',
               icon: _creating ? Icons.hourglass_top : Icons.auto_awesome,
               onPressed: _creating || _busy ? null : _createTrip,
             ),
@@ -596,7 +715,9 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
                 child: LinearProgressIndicator(color: AppColors.accent, backgroundColor: AppColors.sectionTint),
               ),
             const SizedBox(height: 16),
-            if (_confirmation != null)
+            if (o['hotel_id'] == null)
+              const SizedBox.shrink()
+            else if (_confirmation != null)
               LtCard(child: Text('✅ ההזמנה אושרה: $_confirmation', style: _t(14, w: FontWeight.w700, c: AppColors.success)))
             else ...[
               Text('פרטי האורח הראשי (באנגלית)', style: _t(14, w: FontWeight.w700)),
@@ -951,3 +1072,15 @@ class _FlightWebViewScreenState extends State<FlightWebViewScreen> {
   }
 }
 
+
+class _RouteBuilding extends StatelessWidget {
+  const _RouteBuilding();
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: AppColors.bgLight,
+        body: Column(children: [
+          const _Header(title: 'בונים לך מסלול'),
+          const Expanded(child: SingleChildScrollView(child: GlobeLoader(stage: 'ה-AI מתכנן את המסלול שלך יום אחרי יום...'))),
+        ]),
+      );
+}

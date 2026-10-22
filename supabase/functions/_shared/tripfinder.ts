@@ -94,21 +94,53 @@ async function liveFlights(db: SupabaseClient, s: Search, cands: Candidate[], mo
   return ok;
 }
 
+/** Hotel only: no flights. Needs a destination; dates = exact range or an even grid across the window. */
+async function hotelOnlyCandidates(db: SupabaseClient, s: Search): Promise<Candidate[]> {
+  if (!s.destination) throw new Error("למלון בלבד צריך לבחור יעד");
+  const dest = await cached(db, `tp:place:${s.destination}`, 43200, () => resolvePlace(s.destination));
+  if (!dest) throw new Error("לא נמצא היעד");
+  await db.from("trip_searches").update({ dest_lat: dest.lat, dest_lng: dest.lng }).eq("id", s.id);
+  const span = (Date.parse(s.date_to) - Date.parse(s.date_from)) / 86400000;
+  const out: Candidate[] = [];
+  const starts = span <= s.nights_max ? [s.date_from] : [0, 1, 2, 3].map((i) => addDays(s.date_from, Math.round(((span - s.nights_min) * i) / 3)));
+  for (const d of [...new Set(starts)]) for (const n of [...new Set([s.nights_min, s.nights_max])]) {
+    if (addDays(d, n) > s.date_to) continue;
+    out.push({ destination: dest.name, lat: dest.lat, lng: dest.lng, checkin: d, checkout: addDays(d, n), nights: n, dcode: dest.code });
+  }
+  if (!out.length) throw new Error("טווח התאריכים קצר ממספר הלילות");
+  return out.slice(0, 6);
+}
+
 export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
   const { data: s } = await db.from("trip_searches").select("*").eq("id", id).single();
   if (!s) return;
   const set = (v: Record<string, unknown>) => db.from("trip_searches").update(v).eq("id", id);
   try {
     await set({ status: "discovering", progress: 10, error: null });
-    let cands = await discover(db, s);
+    const comps: string[] = s.components ?? ["flight", "hotel"];
+    const wantF = comps.includes("flight"), wantH = comps.includes("hotel");
+    let cands = wantF ? await discover(db, s) : await hotelOnlyCandidates(db, s);
     // Pax-correct Aviasales links (documented format) for every candidate.
     for (const c of cands) if (c.orig && c.dcode) {
       c.flight = { ...(c.flight ?? {}), origin: c.orig, destination: c.dcode, depart: c.checkin, ret: c.checkout,
         link: aviasalesLink(c.orig, c.dcode, c.checkin, c.checkout, s.adults, s.children) };
     }
     const mode = (s.bag_mode ?? "none") as BagMode;
-    await set({ progress: 15 });
-    cands = await liveFlights(db, s, cands, mode);
+    if (wantF) {
+      await set({ progress: 15 });
+      cands = await liveFlights(db, s, cands, mode);
+    } else cands = cands.map((c) => ({ ...c, flight: undefined, flight_price: undefined }));
+    if (!wantH) {
+      // Flight only: one offer per live-priced date pair, no hotel.
+      const rows = cands.filter((c) => c.flight_price != null && (!s.budget || c.flight_price! <= Number(s.budget)))
+        .sort((a, b) => (Number(!!b.flight?.live) - Number(!!a.flight?.live)) || (a.flight_price! - b.flight_price!)).slice(0, 10)
+        .map((c, i) => ({ search_id: id, destination: c.destination, dest_lat: c.lat, dest_lng: c.lng, checkin: c.checkin, checkout: c.checkout,
+          nights: c.nights, flight_price: c.flight_price, flight: c.flight, total: c.flight_price, currency: s.currency ?? "ILS", rank: i + 1,
+          ai_reason: (c.flight?.live?.bag_note ? `🧳 ${c.flight.live.bag_note}. ` : "") + `טיסה בלבד · ${c.nights} לילות` }));
+      if (rows.length) await db.from("trip_offers").insert(rows);
+      await set({ status: "done", progress: 100, error: rows.length ? null : "לא נמצאו טיסות בתקציב" });
+      return;
+    }
     await set({ status: "verifying", progress: 25 });
     const rows: any[] = [];
     let done = 0;
@@ -119,7 +151,7 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
         lat: c.lat, lng: c.lng, checkin: c.checkin, checkout: c.checkout, adults: s.adults, children: s.children, currency: s.currency,
       })).catch((e) => { console.error(e); errs.push(String((e as Error).message ?? e)); return [] as HotelRate[]; });
       for (const r of rates) {
-        const total = r.price + (c.flight_price ?? 0);
+        const total = r.price + (c.flight_price ?? 0); // hotel-only searches have no flight_price
         if (s.budget && total > Number(s.budget)) continue;
         rows.push({
           search_id: id, destination: c.destination, dest_lat: c.lat, dest_lng: c.lng, checkin: c.checkin, checkout: c.checkout, nights: c.nights,

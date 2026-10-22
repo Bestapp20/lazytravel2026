@@ -82,7 +82,7 @@ export async function book(p: {
 
 
 // ───────────── Flights (LiteAPI / Nuitee) ─────────────
-export type BagMode = "none" | "checked" | "carryon";
+export type BagMode = "none" | "checked" | "carryon" | "trolley";
 export type LiveFlight = {
   offer_id: string; total: number; fare_total: number; bag_total: number; currency: string;
   fare_family?: string; airline?: string; carry_on: boolean; checked_included: boolean;
@@ -115,10 +115,15 @@ export async function flightLive(p: {
         if (b.hasCheckedBag) note = `מזוודה ${inclChecked?.weightKg ?? ""} ק״ג כלולה`.replace("  ", " ");
         else if (paidChecked) { bag = paidChecked.pricing.display.amount * pax; note = `+ מזוודה ${paidChecked.weightKg ?? ""} ק״ג (משוער)`; }
         else continue;
-      } else if (p.mode === "carryon") {
-        if (b.hasCarryOnBag) note = "תיק עלייה למטוס כלול";
-        else if (paidCabin) { bag = paidCabin.pricing.display.amount * pax; note = "+ תיק עלייה למטוס (משוער)"; }
+      } else if (p.mode === "trolley") {
+        // Trolley = cabin bag (~8-10kg) on top of the personal item.
+        const inclCabin = (b.included ?? []).find((x: any) => x.bagType === "cabin");
+        if (inclCabin) note = `טרולי ${inclCabin.weightKg ?? ""} ק״ג כלול`.replace("  ", " ");
+        else if (paidCabin) { bag = paidCabin.pricing.display.amount * pax; note = `+ טרולי ${paidCabin.weightKg ?? ""} ק״ג (משוער)`.replace("  ", " "); }
         else continue;
+      } else if (p.mode === "carryon") {
+        // Personal item / small bag only: no extra bag needed, cheapest fare wins.
+        note = "פריט אישי בלבד";
       }
       const total = Math.round((fare + bag) * 100) / 100;
       if (best && best.total <= total) continue;

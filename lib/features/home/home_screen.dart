@@ -231,7 +231,7 @@ class HomeScreen extends ConsumerWidget {
             LtPrimaryButton(
               label: 'תכנן טיול',
               icon: Icons.auto_awesome,
-              onPressed: () => context.push('/wizard/step1'),
+              onPressed: () => context.push('/finder'),
             ),
           ],
         ),

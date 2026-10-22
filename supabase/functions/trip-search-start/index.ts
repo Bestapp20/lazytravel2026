@@ -18,7 +18,8 @@ Deno.serve(async (req) => {
       nights_min: Number(b.nights_min ?? 4), nights_max: Number(b.nights_max ?? b.nights_min ?? 4),
       adults: Number(b.adults ?? 2), children: Number(b.children ?? 0),
       budget: b.budget ?? null, currency: b.currency ?? "ILS",
-      bag_mode: ["checked", "carryon"].includes(b.bag_mode) ? b.bag_mode : "none",
+      bag_mode: ["checked", "carryon", "trolley"].includes(b.bag_mode) ? b.bag_mode : "none",
+      components: Array.isArray(b.components) && b.components.length ? b.components.filter((x: unknown) => ["flight", "hotel", "itinerary"].includes(String(x))) : ["flight", "hotel"],
     };
     const { data, error } = await client.from("trip_searches").insert(row).select("id").single();
     if (error) return json({ error: error.message }, 400);
