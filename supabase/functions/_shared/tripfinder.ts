@@ -93,7 +93,7 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
         const total = r.price + (c.flight_price ?? 0);
         if (s.budget && total > Number(s.budget)) continue;
         rows.push({
-          search_id: id, destination: c.destination, checkin: c.checkin, checkout: c.checkout, nights: c.nights,
+          search_id: id, destination: c.destination, dest_lat: c.lat, dest_lng: c.lng, checkin: c.checkin, checkout: c.checkout, nights: c.nights,
           flight_price: c.flight_price ?? null, flight: c.flight ?? null,
           hotel_id: r.hotel_id, hotel_name: r.hotel_name, hotel_stars: r.stars, hotel_rating: r.rating,
           hotel_photo: r.photo, hotel_address: r.address, room_name: r.room_name, board_name: r.board_name,

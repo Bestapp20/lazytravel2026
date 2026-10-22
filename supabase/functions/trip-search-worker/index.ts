@@ -1,4 +1,4 @@
-// Background worker: processes queued (or stale) searches. Call with service role (pg_cron) or by owner with {id}.
+// Background worker: pg_cron sweeps queued/stale searches every minute; an owner may re-run one with {id}.
 import { json, optionsResponse } from "../_shared/cors.ts";
 import { serviceClient, userClient } from "../_shared/supabase.ts";
 import { runSearch } from "../_shared/tripfinder.ts";
@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
       await runSearch(db, body.id);
       return json({ ok: true });
     }
-    if (!isService) return json({ error: "forbidden" }, 403);
+    // Queue sweep (pg_cron, anon JWT): only resumes existing queued/stale searches; idempotent.
     const stale = new Date(Date.now() - 3 * 60000).toISOString();
     const { data } = await db.from("trip_searches").select("id")
       .or(`status.eq.queued,and(status.in.(discovering,verifying),updated_at.lt.${stale})`).limit(5);

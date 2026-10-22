@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -259,7 +259,7 @@ class _FinderResultsScreenState extends ConsumerState<FinderResultsScreen> {
     if (s['status'] == 'done' || s['status'] == 'error') {
       _poll?.cancel();
       if (_offers.isEmpty && s['status'] == 'done') {
-        final o = await ref.read(supabaseProvider)!.from('trip_offers').select().eq('search_id', widget.searchId).order('rank');
+        final o = await ref.read(supabaseProvider)!.from('trip_offers').select().eq('search_id', widget.searchId).order('rank', ascending: true);
         if (mounted) setState(() => _offers = List<Map<String, dynamic>>.from(o));
       }
     }
@@ -468,6 +468,31 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     }
   }
 
+  Future<void> _createTrip() async {
+    final o = _offer!;
+    final repo = ref.read(tripsRepositoryProvider);
+    if (repo == null) return;
+    setState(() => _busy = true);
+    try {
+      final id = await repo.generateRoute({
+        'destination': {'city': o['destination'], 'lat': o['dest_lat'], 'lng': o['dest_lng']},
+        'start_date': o['checkin'],
+        'end_date': o['checkout'],
+        'adults': 2,
+        'budget_total': o['total'],
+        'currency': o['currency'] ?? 'ILS',
+        'hotel': {'name': o['hotel_name'], 'address': o['hotel_address']},
+        if ((o['flight'] as Map?)?['origin'] != null) 'origin_city': (o['flight'] as Map)['origin'],
+      });
+      ref.invalidate(tripsProvider);
+      if (mounted) context.go('/trips/$id');
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('שגיאה: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Widget _field(TextEditingController c, String hint) => Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: TextField(
@@ -549,6 +574,8 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
               ]),
             ),
             const SizedBox(height: 20),
+            LtSecondaryButton(label: 'צור טיול מההצעה', icon: Icons.auto_awesome, onPressed: _busy ? null : _createTrip),
+            const SizedBox(height: 16),
             if (_confirmation != null)
               LtCard(child: Text('✅ ההזמנה אושרה: $_confirmation', style: _t(14, w: FontWeight.w700, c: AppColors.success)))
             else ...[
