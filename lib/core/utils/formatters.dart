@@ -1,3 +1,4 @@
+import 'category_style.dart';
 import 'package:intl/intl.dart';
 
 import '../theme/app_assets.dart';
@@ -31,29 +32,7 @@ String ils(num? amount) {
   return '₪${n.format(amount.round())}';
 }
 
-String categoryLabel(String? category) {
-  switch (category) {
-    case 'food':
-      return 'מסעדה';
-    case 'hotel':
-      return 'מלון';
-    case 'museum':
-      return 'מוזיאון';
-    case 'nature':
-      return 'טבע';
-    case 'shopping':
-      return 'קניות';
-    case 'nightlife':
-      return 'חיי לילה';
-    case 'flight':
-      return 'טיסה';
-    case 'transport':
-      return 'העברה';
-    case 'attraction':
-    default:
-      return 'אטרקציה';
-  }
-}
+String categoryLabel(String? category, [String name = '']) => catStyle(category, name).label;
 
 String categoryEmoji(String? category) {
   switch (category) {

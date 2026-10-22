@@ -9,6 +9,7 @@ import 'dart:io';
 
 import '../../../core/theme/app_assets.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/category_style.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/lt_widgets.dart';
 import '../../../data/models.dart';
@@ -34,28 +35,7 @@ bool _isBoat(TripItem it) {
   }
 }
 
-IconData categoryIcon(String? c) {
-  switch (c) {
-    case 'flight':
-      return Icons.flight_takeoff;
-    case 'hotel':
-      return Icons.hotel;
-    case 'transport':
-      return Icons.directions_car_filled;
-    case 'food':
-      return Icons.restaurant;
-    case 'museum':
-      return Icons.museum;
-    case 'nature':
-      return Icons.park;
-    case 'shopping':
-      return Icons.shopping_bag;
-    case 'nightlife':
-      return Icons.nightlife;
-    default:
-      return Icons.place;
-  }
-}
+IconData categoryIcon(String? c, [String name = '']) => catStyle(c, name).icon;
 
 String durationLabel(int minutes) {
   if (minutes < 60) return '$minutes דק׳';
@@ -184,17 +164,7 @@ class _ItineraryTimelineState extends ConsumerState<ItineraryTimeline> {
   }
 
   Widget _stopRow(TripItem it, List<TripDocument> itemDocs, {required bool first, required bool last}) {
-    final node = Container(
-      width: 30,
-      height: 30,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: AppColors.ctaSimple,
-        border: Border.all(color: Colors.white, width: 3),
-        boxShadow: [BoxShadow(color: AppColors.accent.withValues(alpha: 0.4), blurRadius: 8)],
-      ),
-      child: Icon(categoryIcon(it.category), size: 14, color: Colors.white),
-    );
+    final node = CategoryMarker(style: catStyle(it.category, it.placeName), size: 30);
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -285,8 +255,8 @@ class _ItineraryTimelineState extends ConsumerState<ItineraryTimeline> {
                   right: 10,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(100)),
-                    child: Text(categoryLabel(it.category),
+                    decoration: BoxDecoration(color: catStyle(it.category, it.placeName).color, borderRadius: BorderRadius.circular(100)),
+                    child: Text(categoryLabel(it.category, it.placeName),
                         style: GoogleFonts.notoSansHebrew(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
                   ),
                 ),

@@ -40,7 +40,8 @@ class AppAssets {
     if (c.contains('rome') || c.contains('roma') || c.contains('רומא')) {
       return rome;
     }
-    return barcelonaHero;
+    // Unknown city: neutral art, never another city's landmark (trips carry their own Places cover).
+    return globe;
   }
 }
 

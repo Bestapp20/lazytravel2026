@@ -56,7 +56,7 @@ class PlaceDetailScreen extends ConsumerWidget {
                       Expanded(
                         child: Text(it.placeName, style: GoogleFonts.notoSansHebrew(fontSize: 26, fontWeight: FontWeight.w900)),
                       ),
-                      LtChip(label: categoryLabel(it.category)),
+                      LtChip(label: categoryLabel(it.category, it.placeName)),
                     ],
                   ),
                   const SizedBox(height: 6),

@@ -160,6 +160,40 @@ class TripsRepository {
     return _client.from('trips').update(data).eq('id', id);
   }
 
+  Future<void> _fresh() async {
+    final exp = _client.auth.currentSession?.expiresAt;
+    if (exp != null && DateTime.fromMillisecondsSinceEpoch(exp * 1000).isBefore(DateTime.now().add(const Duration(minutes: 2)))) {
+      try {
+        await _client.auth.refreshSession();
+      } catch (_) {}
+    }
+  }
+
+  Future<Map<String, dynamic>> _route(Map<String, dynamic> body) async {
+    await _fresh();
+    final res = await _client.functions.invoke('reorder-day', body: body);
+    final data = res.data;
+    if (data is Map && data['error'] != null) throw Exception(data['error']);
+    return Map<String, dynamic>.from(data as Map);
+  }
+
+  /// Re-sequence a day (or a whole trip) by time-of-day rules, opening hours and geography.
+  Future<Map<String, dynamic>> optimizeRoute({String? dayId, String? tripId}) =>
+      _route({'optimize': true, if (dayId != null) 'day_id': dayId, if (tripId != null) 'trip_id': tripId});
+
+  /// Fill a missing trip cover with the destination's own Places photo.
+  Future<void> ensureCover(String tripId) => _route({'cover': true, 'trip_id': tripId});
+
+  /// Save a manual order; returns warnings for stops that don't fit their new slot.
+  Future<List<Map<String, dynamic>>> reorderDay(String dayId, List<String> itemIds) async {
+    final d = await _route({'day_id': dayId, 'item_ids': itemIds});
+    return ((d['warnings'] as List?) ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  /// Best time for a new stop on a day (category window + opening hours + gaps).
+  Future<Map<String, dynamic>> suggestSlot(String dayId, String placeId, String category, int duration) =>
+      _route({'day_id': dayId, 'suggest': {'place_id': placeId, 'category': category, 'duration_minutes': duration}});
+
   Future<String> generateRoute(Map<String, dynamic> payload) async {
     final res = await _client.functions.invoke('generate-route', body: payload);
     final data = res.data;

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/app_assets.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/utils/category_style.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/widgets/lt_widgets.dart';
 import '../../data/models.dart';
@@ -27,11 +30,77 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
   String _cat = 'all';
   int _sheet = 0;
   final _map = MapController();
+  String? _fitKey;
+
+  void _fit(List<LatLng> pts) {
+    try {
+      if (pts.length == 1) {
+        _map.move(pts.first, 15);
+      } else {
+        _map.fitCamera(CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints(pts),
+          padding: const EdgeInsets.fromLTRB(48, 220, 48, 250),
+          maxZoom: 16,
+        ));
+      }
+    } catch (_) {}
+  }
+
+  /// Catmull-Rom smoothing so the route reads as a flowing path rather than straight zig-zags.
+  static List<LatLng> _smooth(List<LatLng> p) {
+    if (p.length < 3) return p;
+    final out = <LatLng>[];
+    for (var i = 0; i < p.length - 1; i++) {
+      final p0 = p[math.max(0, i - 1)], p1 = p[i], p2 = p[i + 1], p3 = p[math.min(p.length - 1, i + 2)];
+      for (var k = 0; k < 12; k++) {
+        final t = k / 12, t2 = t * t, t3 = t2 * t;
+        double f(double a, double b, double c, double d) =>
+            0.5 * ((2 * b) + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+        out.add(LatLng(f(p0.latitude, p1.latitude, p2.latitude, p3.latitude), f(p0.longitude, p1.longitude, p2.longitude, p3.longitude)));
+      }
+    }
+    out.add(p.last);
+    return out;
+  }
+
+  /// Direction arrows at each leg's midpoint, rotated along the leg.
+  static List<Marker> _arrows(List<LatLng> p) => [
+        for (var i = 0; i < p.length - 1; i++)
+          Marker(
+            point: LatLng((p[i].latitude + p[i + 1].latitude) / 2, (p[i].longitude + p[i + 1].longitude) / 2),
+            width: 22,
+            height: 22,
+            child: Transform.rotate(
+              angle: math.atan2(p[i + 1].longitude - p[i].longitude, p[i + 1].latitude - p[i].latitude),
+              child: Container(
+                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 3)]),
+                child: const Icon(Icons.navigation_rounded, size: 15, color: AppColors.primaryDark),
+              ),
+            ),
+          ),
+      ];
 
   @override
   void initState() {
     super.initState();
     _dayId = widget.dayId;
+  }
+
+  Marker _marker(List<TripItem> items, int i) {
+    final it = items[i];
+    final sel = i == _sheet;
+    return Marker(
+      point: LatLng(it.lat!, it.lng!),
+      width: sel ? 62 : 52,
+      height: sel ? 62 : 52,
+      child: GestureDetector(
+        onTap: () {
+          setState(() => _sheet = i);
+          _map.move(LatLng(it.lat!, it.lng!), _map.camera.zoom);
+        },
+        child: CategoryMarker(style: catStyle(it.category, it.placeName), order: i + 1, selected: sel),
+      ),
+    );
   }
 
   @override
@@ -42,53 +111,74 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
     final day = days.where((d) => d.id == _dayId).cast<TripDay?>().firstOrNull ?? (days.isEmpty ? null : days.first);
     final items = (day?.items ?? []).where((i) => i.lat != null && i.lng != null).where((i) {
       if (_cat == 'all') return true;
-      return i.category == _cat;
+      return catStyle(i.category, i.placeName).key == _cat;
     }).toList();
     final center = items.isNotEmpty
         ? LatLng(items.first.lat!, items.first.lng!)
         : LatLng(trip.hotel?.lat ?? trip.destinations.firstOrNull?.lat ?? 41.39, trip.hotel?.lng ?? trip.destinations.firstOrNull?.lng ?? 2.17);
     final current = items.isEmpty ? null : items[_sheet.clamp(0, items.length - 1)];
+    final pts = items.map((e) => LatLng(e.lat!, e.lng!)).toList();
+    final fitKey = '${day?.id}|$_cat|${pts.length}';
+    if (fitKey != _fitKey && pts.isNotEmpty) {
+      _fitKey = fitKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fit(pts));
+    }
+    final dayCats = <String, CatStyle>{
+      for (final i in (day?.items ?? const <TripItem>[]).where((i) => i.lat != null)) catStyle(i.category, i.placeName).key: catStyle(i.category, i.placeName),
+    };
+    final smooth = _smooth(pts);
 
     return Scaffold(
       body: Stack(
         children: [
-          FlutterMap(
+          // The map canvas is direction-agnostic; RTL ambient direction breaks tile placement.
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: FlutterMap(
             mapController: _map,
-            options: MapOptions(initialCenter: center, initialZoom: 13),
+            options: MapOptions(
+              initialCenter: center,
+              initialZoom: 13,
+              initialCameraFit: pts.length > 1
+                  ? CameraFit.bounds(bounds: LatLngBounds.fromPoints(pts), padding: const EdgeInsets.fromLTRB(48, 220, 48, 250), maxZoom: 16)
+                  : null,
+            ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                // Esri World Street Map (keyless). CARTO now needs an API key and OSM's
+                // public tile servers block app traffic (tiles stayed blank).
+                urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+                maxNativeZoom: 19,
+                retinaMode: RetinaMode.isHighDensity(context),
+                tileDisplay: const TileDisplay.instantaneous(),
                 userAgentPackageName: 'com.lazytravel.lazy_travel',
+                tileProvider: _TileImages(),
+                errorTileCallback: (tile, error, _) => debugPrint('TILE_ERR ${tile.coordinates} $error'),
               ),
+              const SimpleAttributionWidget(source: Text('Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors', style: TextStyle(fontSize: 9)), alignment: Alignment.topLeft),
               if (items.length > 1)
                 PolylineLayer(
                   polylines: [
+                    Polyline(points: smooth, color: Colors.white, strokeWidth: 9),
                     Polyline(
-                      points: items.map((e) => LatLng(e.lat!, e.lng!)).toList(),
-                      color: AppColors.accent,
-                      strokeWidth: 4,
-                      pattern: StrokePattern.dotted(),
+                      points: smooth,
+                      strokeWidth: 5.5,
+                      gradientColors: const [AppColors.accent, AppColors.primaryDark],
+                      strokeCap: StrokeCap.round,
+                      strokeJoin: StrokeJoin.round,
                     ),
                   ],
                 ),
+              if (items.length > 1) MarkerLayer(markers: _arrows(pts)),
               MarkerLayer(
                 markers: [
                   for (var i = 0; i < items.length; i++)
-                    Marker(
-                      point: LatLng(items[i].lat!, items[i].lng!),
-                      width: 36,
-                      height: 36,
-                      child: GestureDetector(
-                        onTap: () => setState(() => _sheet = i),
-                        child: CircleAvatar(
-                          backgroundColor: i == _sheet ? AppColors.primaryDark : AppColors.accent,
-                          child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
-                        ),
-                      ),
-                    ),
+                    if (i != _sheet) _marker(items, i),
+                  if (items.isNotEmpty) _marker(items, _sheet.clamp(0, items.length - 1)),
                 ],
               ),
             ],
+          ),
           ),
           SafeArea(
             child: Padding(
@@ -125,14 +215,22 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                       },
                     ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    children: [
-                      LtChip(label: 'הכל', selected: _cat == 'all', onTap: () => setState(() => _cat = 'all')),
-                      LtChip(label: 'אטרקציות', selected: _cat == 'attraction', onTap: () => setState(() => _cat = 'attraction')),
-                      LtChip(label: 'אוכל', selected: _cat == 'food', onTap: () => setState(() => _cat = 'food')),
-                      LtChip(label: 'מלונות', selected: _cat == 'hotel', onTap: () => setState(() => _cat = 'hotel')),
-                    ],
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        LtChip(label: 'הכל', selected: _cat == 'all', onTap: () => setState(() { _cat = 'all'; _sheet = 0; })),
+                        for (final c in dayCats.values) ...[
+                          const SizedBox(width: 6),
+                          LtChip(
+                            label: c.label,
+                            leading: Icon(c.icon, size: 14, color: _cat == c.key ? Colors.white : c.color),
+                            selected: _cat == c.key,
+                            onTap: () => setState(() { _cat = c.key; _sheet = 0; }),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -158,7 +256,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(categoryLabel(current.category), style: GoogleFonts.notoSansHebrew(color: AppColors.accent, fontSize: 12, fontWeight: FontWeight.w700)),
+                                Text('${categoryLabel(current.category, current.placeName)}${current.startTime != null ? '  ·  ${hhmm(current.startTime)}' : ''}', style: GoogleFonts.notoSansHebrew(color: catStyle(current.category, current.placeName).color, fontSize: 12, fontWeight: FontWeight.w800)),
                                 Text(current.placeName, style: GoogleFonts.notoSansHebrew(fontWeight: FontWeight.w800, fontSize: 16)),
                                 if (current.rating != null) Text('${current.rating} ★', style: GoogleFonts.notoSansHebrew(fontSize: 12)),
                               ],
@@ -199,4 +297,24 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
       ),
     );
   }
+}
+
+
+/// Loads tiles through Flutter's own image pipeline (dart:io HttpClient + ImageCache).
+/// flutter_map's default http-based provider left tiles blank on Android.
+class _TileImages extends TileProvider {
+  _TileImages() : super(headers: {'User-Agent': 'LazyTravel/1.0 (com.lazytravel.lazy_travel)'});
+  @override
+  ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
+    final url = getTileUrl(coordinates, options);
+    final img = NetworkImage(url, headers: headers);
+    if (_n++ < 4) {
+      debugPrint('TILE_GET $url');
+      img.resolve(ImageConfiguration.empty).addListener(ImageStreamListener(
+          (i, _) => debugPrint('TILE_OK ${i.image.width}x${i.image.height} $url'),
+          onError: (e, _) => debugPrint('TILE_FAIL $e')));
+    }
+    return img;
+  }
+  static int _n = 0;
 }

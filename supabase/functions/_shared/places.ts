@@ -10,6 +10,7 @@ export type PlaceHit = {
   types?: string[];
   photo_reference?: string;
   map_link?: string;
+  hours?: { periods?: unknown[]; weekdayDescriptions?: string[] } | null;
 };
 
 function key(): string {
@@ -58,7 +59,7 @@ export async function autocomplete(input: string, types = "(cities)"): Promise<u
   return { predictions, status: data.error ? "ERROR" : "OK" };
 }
 
-const FIELDS = "id,displayName,formattedAddress,location,rating,priceLevel,types,photos,googleMapsUri";
+const FIELDS = "id,displayName,formattedAddress,location,rating,priceLevel,types,photos,googleMapsUri,regularOpeningHours";
 
 export async function textSearch(query: string, location?: { lat: number; lng: number }): Promise<PlaceHit[]> {
   const body: Record<string, unknown> = { textQuery: query, languageCode: "en", pageSize: 12 };
@@ -110,6 +111,9 @@ function mapResult(r: Record<string, any>): PlaceHit {
     price_level: r.priceLevel != null ? PRICE[r.priceLevel] : undefined,
     types: r.types,
     photo_reference: r.photos?.[0]?.name,
+    hours: r.regularOpeningHours
+      ? { periods: r.regularOpeningHours.periods, weekdayDescriptions: r.regularOpeningHours.weekdayDescriptions }
+      : null,
     map_link: r.googleMapsUri ?? (lat != null && lng != null ? `https://maps.google.com/?q=${lat},${lng}` : undefined),
   };
 }
@@ -173,4 +177,15 @@ export async function placeDetailsFull(placeId: string, lang = "he"): Promise<Pl
       when: v.relativePublishTimeDescription,
     })).filter((v) => v.text),
   };
+}
+
+/** Destination cover: the city's own Places photo (public URI). */
+export async function cityCoverPhoto(city: string, country?: string): Promise<string | null> {
+  try {
+    const hits = await textSearch(`${city}${country ? ", " + country : ""} city`);
+    const ref = hits.find((h) => h.photo_reference)?.photo_reference;
+    return ref ? await photoMediaUri(ref, 1200) : null;
+  } catch {
+    return null;
+  }
 }

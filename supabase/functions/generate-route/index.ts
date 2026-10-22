@@ -1,5 +1,6 @@
 import { json, optionsResponse } from "../_shared/cors.ts";
-import { INTEREST_QUERIES, PlaceHit, photoMediaUri, textSearch } from "../_shared/places.ts";
+import { cityCoverPhoto, INTEREST_QUERIES, PlaceHit, photoMediaUri, textSearch } from "../_shared/places.ts";
+import { categoryFromPlace, DURATION, fmtHM, km, RULES_PROMPT, scheduleDay, Stop } from "../_shared/scheduler.ts";
 import { serviceClient, userClient } from "../_shared/supabase.ts";
 
 type Destination = {
@@ -68,17 +69,8 @@ function addDays(iso: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function categoryFromTypes(types?: string[]): string {
-  if (!types?.length) return "attraction";
-  if (types.includes("lodging")) return "hotel";
-  if (types.includes("restaurant") || types.includes("cafe") || types.includes("food")) {
-    return "food";
-  }
-  if (types.includes("bar") || types.includes("night_club")) return "nightlife";
-  if (types.includes("museum")) return "museum";
-  if (types.includes("park") || types.includes("natural_feature")) return "nature";
-  if (types.includes("shopping_mall") || types.includes("store")) return "shopping";
-  return "attraction";
+function categoryFromTypes(types?: string[], name = ""): string {
+  return categoryFromPlace(types, name);
 }
 
 async function gatherCandidates(p: Payload): Promise<PlaceHit[]> {
@@ -140,7 +132,7 @@ async function planWithLlm(
       {
         role: "system",
         content:
-          "You are LAZYTRAVEL's itinerary planner. Return ONLY JSON of the form {\"days\":[{\"day_index\":1,\"title\":\"...\",\"items\":[...]}]}. Each item must use a place_id from the candidate list. Order items geographically. Respect kosher, kids, pace, and budget. Time slots between 09:00 and 21:00. Include a short Hebrew ai_tip for each item.",
+          "You are LAZYTRAVEL's itinerary planner. Return ONLY JSON of the form {\"days\":[{\"day_index\":1,\"title\":\"...\",\"items\":[...]}]}. Each item must use a place_id from the candidate list. Order items geographically. Respect kosher, kids, pace, and budget. Include a short Hebrew ai_tip for each item consistent with its time slot.\n" + RULES_PROMPT,
       },
       {
         role: "user",
@@ -169,6 +161,8 @@ async function planWithLlm(
             lng: c.lng,
             rating: c.rating,
             types: c.types,
+            category: categoryFromPlace(c.types, c.name),
+            opening_hours: c.hours?.weekdayDescriptions ?? null,
           })),
         }),
       },
@@ -193,64 +187,66 @@ async function planWithLlm(
   return (parsed.days ?? []) as LlmDay[];
 }
 
-const DURATION: Record<string, number> = {
-  museum: 120, food: 75, nature: 90, shopping: 60, nightlife: 120, hotel: 30, attraction: 75,
-};
-const TIPS: Record<string, string[]> = {
-  museum: ["כדאי להזמין כרטיסים מראש באתר הרשמי כדי לדלג על התור", "בדקו ימים עם כניסה חינם או מוזלת"],
-  food: ["מומלץ להזמין מקום מראש, במיוחד בערב", "שאלו על מנת היום — לרוב משתלמת יותר"],
-  nature: ["הגיעו מוקדם לאור טוב ופחות אנשים", "קחו מים וכובע"],
-  shopping: ["השוו מחירים לפני קנייה ובקשו החזר מע״מ (Tax Free)"],
-  nightlife: ["בדקו קוד לבוש ושעות פתיחה לפני שיוצאים"],
-  attraction: ["הגיעו מוקדם בבוקר כדי להימנע מעומס", "שווה לצלם מהזווית הפחות מוכרת — שאלו את המקומיים", "שמרו על חפצי ערך באזורים הומי תיירים"],
-  hotel: ["השאירו מזוודות בקבלה אם החדר עוד לא מוכן"],
-};
-
-function fmt(min: number): string {
-  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
-}
-
-/** Non-AI plan: spread places across days, no back-to-back restaurants, lunch/dinner placement, varied durations. */
+/** Non-AI plan: geographic sectors per day, a cafe/lunch/dinner/evening mix, then the time-aware scheduler. */
 function fallbackPlan(p: Payload, days: number, candidates: PlaceHit[]): LlmDay[] {
-  const food = candidates.filter((c) => categoryFromTypes(c.types) === "food");
-  const sights = candidates.filter((c) => categoryFromTypes(c.types) !== "food");
   const pace = p.pace ?? "balanced";
   const sightsPerDay = pace === "relaxed" ? 2 : pace === "intense" ? 4 : 3;
+  const c0 = { lat: p.hotel?.lat ?? p.destination.lat, lng: p.hotel?.lng ?? p.destination.lng };
+  const withCat = candidates.filter((c) => c.lat != null).map((c) => ({ c, cat: categoryFromPlace(c.types, c.name) }))
+    .filter((x) => x.cat !== "hotel" && x.cat !== "flight");
+  const ang = (c: PlaceHit) => c0.lat == null ? 0 : Math.atan2(c.lat! - c0.lat!, c.lng! - c0.lng!);
+  withCat.sort((a, b) => ang(a.c) - ang(b.c));
+  const food = new Set(["restaurant", "cafe", "bar"]);
+  const sights = withCat.filter((x) => !food.has(x.cat));
+  const take = (cat: string, used: Set<string>, near: PlaceHit[]) => {
+    const pool = withCat.filter((x) => x.cat === cat && !used.has(x.c.place_id));
+    if (!pool.length) return null;
+    const ref = near[0] ?? pool[0].c;
+    pool.sort((a, b) => km(a.c, ref) - km(b.c, ref));
+    return pool[0].c;
+  };
+  const used = new Set<string>();
   const out: LlmDay[] = [];
-  let tipN = 0;
   for (let d = 0; d < days; d++) {
-    const daySights = sights.slice(d * sightsPerDay, d * sightsPerDay + sightsPerDay);
-    const dayFood = food.slice(d * 2, d * 2 + 2);
-    // order: sight, sight, lunch, sight(s), dinner — never two food stops in a row
-    const seq: PlaceHit[] = [];
-    daySights.forEach((s, i) => {
-      seq.push(s);
-      if (i === 1 && dayFood[0]) seq.push(dayFood[0]);
+    const daySights = sights.filter((x) => !used.has(x.c.place_id)).slice(0, sightsPerDay).map((x) => x.c);
+    daySights.forEach((x) => used.add(x.place_id));
+    const extra: PlaceHit[] = [];
+    for (const cat of ["cafe", "restaurant", "restaurant", "bar"]) {
+      if (cat === "bar" && !((p.interests?.nightlife ?? 0) > 0) && d % 2 === 1) continue;
+      const h = take(cat, used, daySights);
+      if (h) { used.add(h.place_id); extra.push(h); }
+    }
+    out.push({
+      day_index: d + 1,
+      title: `${p.destination.city} — יום ${d + 1}`,
+      items: [...daySights, ...extra].map((c) => ({ place_id: c.place_id, start_time: "", category: categoryFromPlace(c.types, c.name) })),
     });
-    if (daySights.length < 2 && dayFood[0]) seq.push(dayFood[0]);
-    if (dayFood[1] && categoryFromTypes(seq[seq.length - 1]?.types) !== "food") seq.push(dayFood[1]);
-    let t = 9 * 60 + (d % 2) * 30;
-    const items: LlmItem[] = seq.map((c, i) => {
-      const cat = categoryFromTypes(c.types);
-      if (cat === "food" && i > 0 && t < 12 * 60 + 30 && i <= 3) t = Math.max(t, 12 * 60 + 30);
-      if (cat === "food" && i === seq.length - 1 && i > 2) t = Math.max(t, 19 * 60);
-      const dur = (DURATION[cat] ?? 75) + ((c.rating ?? 4) >= 4.6 && cat !== "food" ? 30 : 0);
-      const tips = TIPS[cat] ?? TIPS.attraction;
-      const item: LlmItem = {
-        place_id: c.place_id,
-        start_time: fmt(t),
-        end_time: fmt(t + dur),
-        duration_minutes: dur,
-        category: cat,
-        ai_tip: tips[tipN++ % tips.length],
-      };
-      t += dur + 25; // travel buffer
-      t = Math.ceil(t / 15) * 15;
-      return item;
-    });
-    out.push({ day_index: d + 1, title: `${p.destination.city} — יום ${d + 1}`, items });
   }
   return out;
+}
+
+/** Validate any plan (AI or fallback) against the rules: re-time, re-order, regenerate tips from the real slot. */
+function enforceRules(p: Payload, plan: LlmDay[], byId: Map<string, PlaceHit>): LlmDay[] {
+  const base = p.hotel?.lat != null ? ({ key: "hotel", name: "hotel", category: "hotel", lat: p.hotel.lat, lng: p.hotel.lng } as Stop) : null;
+  return plan.map((day, i) => {
+    const date = addDays(p.start_date, (day.day_index ?? i + 1) - 1);
+    const stops: Stop[] = day.items.map((it) => byId.get(it.place_id)).filter((x): x is PlaceHit => !!x).map((h) => {
+      const cat = categoryFromPlace(h.types, h.name);
+      return { key: h.place_id, name: h.name, category: cat, lat: h.lat, lng: h.lng, hours: h.hours as any, rating: h.rating,
+        duration: DURATION[cat] + ((h.rating ?? 4) >= 4.6 && !["restaurant", "cafe", "bar"].includes(cat) ? 30 : 0) };
+    });
+    const { slots, dropped } = scheduleDay(stops, date, base);
+    if (dropped.length) console.log("dropped (no fitting slot)", dropped.map((d) => d.name));
+    const llmById = new Map(day.items.map((x) => [x.place_id, x]));
+    return {
+      day_index: day.day_index ?? i + 1,
+      title: day.title,
+      items: slots.map((s) => ({
+        place_id: s.key, start_time: fmtHM(s.start), end_time: fmtHM(s.end), duration_minutes: s.end - s.start,
+        category: s.category, ai_tip: s.tip, notes: llmById.get(s.key)?.notes,
+      })),
+    };
+  });
 }
 
 async function maybeWeather(lat?: number, lng?: number, days = 1) {
@@ -289,6 +285,7 @@ Deno.serve(async (req) => {
       console.error("LLM failed, using fallback clusters", e);
       plan = fallbackPlan(payload, daysN, candidates);
     }
+    plan = enforceRules(payload, plan, new Map(candidates.map((c) => [c.place_id, c])));
 
     const byId = new Map(candidates.map((c) => [c.place_id, c]));
     const weather = await maybeWeather(
@@ -307,6 +304,7 @@ Deno.serve(async (req) => {
       if (uri) photoById.set(id, uri);
     }));
 
+    const cover = await cityCoverPhoto(payload.destination.city, payload.destination.country);
     const admin = serviceClient();
     const dests = [payload.destination, ...(payload.extra_cities ?? [])];
     const { data: trip, error: tripErr } = await admin
@@ -329,6 +327,7 @@ Deno.serve(async (req) => {
         interests: payload.interests ?? {},
         hotel: payload.hotel ?? null,
         status: "planned",
+        cover_image_url: cover,
         origin_city: payload.origin_city,
         generation_params: payload,
       })
@@ -372,7 +371,8 @@ Deno.serve(async (req) => {
           day_id: dayRow.id,
           place_name: place.name,
           google_place_id: place.place_id,
-          category: it.category ?? categoryFromTypes(place.types),
+          category: it.category ?? categoryFromTypes(place.types, place.name),
+          hours: place.hours ?? null,
           address: place.address,
           lat: place.lat,
           lng: place.lng,

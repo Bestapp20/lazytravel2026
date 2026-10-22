@@ -36,6 +36,24 @@ class _PlacePreviewScreenState extends ConsumerState<PlacePreviewScreen> {
   final _page = PageController();
   int _photo = 0;
   TimeOfDay? _time;
+  Map<String, dynamic>? _slot; // server suggestion: start_time, tip, warning, category
+  bool _slotAsked = false;
+
+  Future<void> _askSlot(TripDay day) async {
+    if (_slotAsked) return;
+    _slotAsked = true;
+    try {
+      final s = await ref.read(tripsRepositoryProvider)?.suggestSlot(day.id, widget.place.placeId, widget.itemCategory, _duration);
+      if (!mounted || s == null) return;
+      final st = s['start_time'] as String?;
+      setState(() {
+        _slot = s;
+        if (_time == null && st != null) _time = TimeOfDay(hour: int.parse(st.substring(0, 2)), minute: int.parse(st.substring(3, 5)));
+        final d = s['duration_minutes'];
+        if (d is int) _duration = d;
+      });
+    } catch (_) {}
+  }
   late int _duration = _kDefaultDuration[widget.itemCategory] ?? 90;
   bool _saving = false;
   bool _hoursOpen = false;
@@ -70,12 +88,14 @@ class _PlacePreviewScreenState extends ConsumerState<PlacePreviewScreen> {
       final time = _fmt(_time ?? _suggestedTime(day.items));
       final p = widget.place;
       final tips = _kTips[widget.itemCategory] ?? _kTips['attraction']!;
+      final slotTip = _slot != null && _slot!['start_time'] == time ? _slot!['tip'] as String? : null;
       final created = await repo.upsertItem({
         'trip_id': widget.tripId,
         'day_id': day.id,
         'place_name': full?.name ?? p.name,
         'google_place_id': p.placeId,
-        'category': widget.itemCategory,
+        'category': (_slot?['category'] as String?) ?? widget.itemCategory,
+        if (_slot?['hours'] != null) 'hours': _slot!['hours'],
         'address': full?.address ?? p.address,
         'lat': full?.lat ?? p.lat,
         'lng': full?.lng ?? p.lng,
@@ -86,7 +106,7 @@ class _PlacePreviewScreenState extends ConsumerState<PlacePreviewScreen> {
         'price_level': full?.priceLevel,
         'photo_url': (full?.photos.isNotEmpty ?? false) ? full!.photos.first : p.photoUrl,
         'photo_reference': full?.photoReference ?? p.photoReference,
-        'ai_tip': tips.first,
+        'ai_tip': slotTip ?? tips.first,
         'notes': full?.summary,
         'sort_order': day.items.length,
       });
@@ -322,7 +342,10 @@ class _PlacePreviewScreenState extends ConsumerState<PlacePreviewScreen> {
       );
 
   Widget _addBar(PlaceFull? full, TripDay day) {
+    _askSlot(day);
     final t = _time ?? _suggestedTime(day.items);
+    final suggested = _slot?['start_time'] as String?;
+    final warn = _slot?['warning'] as String?;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
@@ -333,6 +356,20 @@ class _PlacePreviewScreenState extends ConsumerState<PlacePreviewScreen> {
       child: SafeArea(
         top: false,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (suggested != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(children: [
+                Icon(warn != null ? Icons.warning_amber_rounded : Icons.auto_awesome, size: 16, color: warn != null ? AppColors.warning : AppColors.accent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    warn ?? (_fmt(t) == suggested ? 'השעה המומלצת ליום הזה: $suggested (לפי שעות הפתיחה והמסלול)' : 'מומלץ: $suggested'),
+                    style: GoogleFonts.notoSansHebrew(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.primaryDark),
+                  ),
+                ),
+              ]),
+            ),
           Row(children: [
             Expanded(
               child: _pickerChip(Icons.schedule, 'שעה · ${_fmt(t)}', () async {
