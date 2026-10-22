@@ -8,6 +8,7 @@ import '../../core/theme/app_assets.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/widgets/lt_widgets.dart';
+import '../../core/widgets/ticket_button.dart';
 import '../../data/models.dart';
 import '../../data/providers.dart';
 
@@ -110,6 +111,7 @@ class PlaceDetailScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              TicketButton(tripId: tripId, itemId: it.id),
               Row(
                 children: [
                   Expanded(

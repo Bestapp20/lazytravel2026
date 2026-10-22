@@ -12,6 +12,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/category_style.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/lt_widgets.dart';
+import '../../../core/widgets/ticket_button.dart';
 import '../../../data/models.dart';
 import '../../../data/providers.dart';
 
@@ -290,6 +291,7 @@ class _ItineraryTimelineState extends ConsumerState<ItineraryTimeline> {
                     if (it.rating != null && !const {'flight', 'transport'}.contains(it.category)) _pill(Icons.star_rounded, '${it.rating}'),
                   ],
                 ),
+                if (!isLogistics(it)) TicketButton(tripId: widget.trip.id, itemId: it.id, compact: true),
                 if (isLogistics(it)) ...[
                   const SizedBox(height: 10),
                   _ticketRow(it, itemDocs, busy),
