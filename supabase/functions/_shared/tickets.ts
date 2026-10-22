@@ -11,7 +11,7 @@ const LITE = "https://api.liteapi.travel/v3.0";
 const MARKER = () => Deno.env.get("TRAVELPAYOUTS_MARKER") || "744429";
 
 const TICKETED = /(museum|museo|musée|gallery|galleria|colosseum|colosseo|roman forum|foro romano|palatine|palace|palazzo|castle|castel|fort\b|fortress|archaeolog|ruins|domus|catacomb|vatican|sistine|zoo|aquarium|theme park|water ?park|observatory|pantheon|tomb|mausoleum|cathedral museum|tour\b|cruise|exhibition|planetarium|crypt|מוזיאון|גלריה|מבצר|ארמון|טירה|קולוסיאום)/i;
-const FREE = /(fountain|fontana|piazza|square|steps|street|via |beach|market|hill|bridge|ponte|promenade|marina|harbou?r|mouth of truth|bocca della|arch of|arco di|viewpoint|lake|park\b)/i;
+const FREE = /(fountain|fontana|piazza|square|steps|street|via |beach|market|hill|bridge|ponte|promenade|marina|harbou?r|mouth of truth|bocca della|arch of|arco di|viewpoint|lake|park\b|memorial|monument|church|chiesa|basilica|mosque|synagogue|statue|cemetery)/i;
 
 export function ticketable(name: string, category: string): boolean {
   if (["flight", "transport", "hotel", "restaurant", "cafe", "bar", "food", "nightlife", "beach", "market"].includes(category)) return false;
