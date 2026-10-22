@@ -141,6 +141,7 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
     setState(() => _busy = true);
     try {
       final f = DateFormat('yyyy-MM-dd');
+      await _freshSession(client);
       final res = await client.functions.invoke('trip-search-start', body: {
         'origin': _origin.text.trim().isEmpty ? 'TLV' : _origin.text.trim(),
         'destination': anywhere ? null : _dest.text.trim(),
@@ -177,6 +178,7 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
     final nav = Navigator.of(context);
     nav.push(PageRouteBuilder(opaque: false, pageBuilder: (_, _, _) => const _RouteBuilding()));
     try {
+      await _freshSession(ref.read(supabaseProvider));
       final id = await repo.generateRoute({
         'destination': {'city': _dest.text.trim()},
         'start_date': f.format(start),
@@ -396,6 +398,7 @@ class _FinderResultsScreenState extends ConsumerState<FinderResultsScreen> {
   void initState() {
     super.initState();
     final client = ref.read(supabaseProvider)!;
+    _finderClient = client;
     _sub = client.from('trip_searches').stream(primaryKey: ['id']).eq('id', widget.searchId).listen((rows) {
       if (rows.isNotEmpty) _onSearch(rows.first);
     });
@@ -523,6 +526,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     final client = ref.read(supabaseProvider)!;
     setState(() => _busy = true);
     try {
+      await _freshSession(client);
       final pre = await client.functions.invoke('hotel-prebook', body: {'offer_id': widget.offerId});
       final p = Map<String, dynamic>.from(pre.data as Map);
       if (p['error'] != null) throw Exception(p['error']);
@@ -1084,3 +1088,19 @@ class _RouteBuilding extends StatelessWidget {
         ]),
       );
 }
+
+/// Refresh the auth session if it's expired or about to expire, so edge
+/// functions (verify_jwt) don't reject the call with 401 after a slow cold start.
+Future<void> _freshSession(dynamic client) async {
+  if (client == null) return;
+  try {
+    final auth = client.auth;
+    final s = auth.currentSession;
+    if (s == null) return;
+    final exp = s.expiresAt as int?;
+    final soon = exp == null || DateTime.fromMillisecondsSinceEpoch(exp * 1000).isBefore(DateTime.now().add(const Duration(minutes: 2)));
+    if (soon) await auth.refreshSession();
+  } catch (_) {}
+}
+
+dynamic _finderClient;

@@ -510,6 +510,7 @@ class _FlightCheckoutScreenState extends ConsumerState<FlightCheckoutScreen> {
     setState(() => _phase = 'reprice');
     try {
       final phone = _phone.text.replaceAll(RegExp(r'\D'), '').replaceFirst(RegExp(r'^(972|0)'), '');
+      await _freshSession(client);
       final res = await client.functions.invoke('flight-prebook', body: {
         'offer_id': widget.offer['id'],
         'with_bags': _bags,
@@ -552,6 +553,7 @@ class _FlightCheckoutScreenState extends ConsumerState<FlightCheckoutScreen> {
       )));
       if (paid != true || !mounted) return;
       setState(() => _phase = 'booking');
+      await _freshSession(client);
       final b = await client.functions.invoke('flight-book', body: {'booking_id': q['booking_id']});
       final r = Map<String, dynamic>.from(b.data as Map);
       if (r['error'] != null) throw Exception(r['error']);

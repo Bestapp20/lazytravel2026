@@ -6,6 +6,7 @@ const Map<String, (String, String, String)> _cities = {
   'BKK': ('בנגקוק', 'TH', 'תאילנד'), 'DMK': ('בנגקוק', 'TH', 'תאילנד'), 'HKT': ('פוקט', 'TH', 'תאילנד'), 'USM': ('קו סמוי', 'TH', 'תאילנד'),
   'CNX': ('צ׳יאנג מאי', 'TH', 'תאילנד'), 'BUH': ('בוקרשט', 'RO', 'רומניה'), 'OTP': ('בוקרשט', 'RO', 'רומניה'), 'ATH': ('אתונה', 'GR', 'יוון'),
   'SKG': ('סלוניקי', 'GR', 'יוון'), 'HER': ('כרתים', 'GR', 'יוון'), 'RHO': ('רודוס', 'GR', 'יוון'), 'LCA': ('לרנקה', 'CY', 'קפריסין'),
+  'CTA': ('קטניה', 'IT', 'איטליה'), 'PMO': ('פלרמו', 'IT', 'איטליה'), 'BRI': ('בארי', 'IT', 'איטליה'), 'CAG': ('קליארי', 'IT', 'איטליה'),
   'PFO': ('פאפוס', 'CY', 'קפריסין'), 'ROM': ('רומא', 'IT', 'איטליה'), 'FCO': ('רומא', 'IT', 'איטליה'), 'MIL': ('מילאנו', 'IT', 'איטליה'),
   'MXP': ('מילאנו', 'IT', 'איטליה'), 'VCE': ('ונציה', 'IT', 'איטליה'), 'NAP': ('נאפולי', 'IT', 'איטליה'), 'PAR': ('פריז', 'FR', 'צרפת'),
   'CDG': ('פריז', 'FR', 'צרפת'), 'NCE': ('ניס', 'FR', 'צרפת'), 'LON': ('לונדון', 'GB', 'בריטניה'), 'LHR': ('לונדון', 'GB', 'בריטניה'),
@@ -54,10 +55,12 @@ class _OfferCard extends StatelessWidget {
           child: SizedBox(
             height: h,
             child: Stack(fit: StackFit.expand, children: [
-              photo == null
-                  ? const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [AppColors.accentLight, AppColors.primaryDark])))
-                  : Image.network(photo, fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [AppColors.accentLight, AppColors.primaryDark])))),
+              photo != null
+                  ? _netImg(photo)
+                  : FutureBuilder<String?>(
+                      future: _cityPhoto(en),
+                      builder: (_, snap) => snap.data == null ? _skyFill : _netImg(snap.data!),
+                    ),
               const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, stops: [0, 0.35, 1],
@@ -305,4 +308,24 @@ class _GlobePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_GlobePainter old) => false;
+}
+
+const _skyFill = DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [AppColors.accentLight, AppColors.primaryDark])));
+Widget _netImg(String url) => Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => _skyFill);
+
+/// Destination photo (Google Places city photo via places-search), cached per city.
+final Map<String, Future<String?>> _cityPhotoCache = {};
+Future<String?> _cityPhoto(String city) {
+  if (city.trim().isEmpty) return Future.value(null);
+  return _cityPhotoCache.putIfAbsent(city, () async {
+    try {
+      final client = _finderClient;
+      if (client == null) return null;
+      final res = await client.functions.invoke('places-search', body: {'query': '$city city skyline', 'limit': 1, 'with_photos': true});
+      final r = (res.data is Map ? res.data['results'] : null) as List?;
+      return r == null || r.isEmpty ? null : (r.first as Map)['photo_url'] as String?;
+    } catch (_) {
+      return null;
+    }
+  });
 }
