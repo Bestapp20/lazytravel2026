@@ -73,20 +73,24 @@ async function discover(db: SupabaseClient, s: Search): Promise<Candidate[]> {
   return out;
 }
 
-/** Stage 1b (bag filter on): live LiteAPI pricing for up to 6 date pairs, in parallel, cached 30 min. */
+/** Stage 1b: live LiteAPI pricing for the shortlist (max 8 date pairs), in parallel, cached 30 min.
+ * Every shortlisted flight gets a live, in-app bookable price. With a bag filter, unpriced pairs are dropped;
+ * without one they stay as "not bookable in app" (estimated cache price only). */
+const LIVE_CAP = 8;
 async function liveFlights(db: SupabaseClient, s: Search, cands: Candidate[], mode: BagMode): Promise<Candidate[]> {
   const cur = String(s.currency ?? "ILS");
-  const top = cands.filter((c) => c.orig && c.dcode).slice(0, 6);
+  const strict = mode !== "none";
+  const top = cands.filter((c) => c.orig && c.dcode).slice(0, LIVE_CAP);
   const res = await Promise.all(top.map(async (c) => {
     const k = `lf:${c.orig}:${c.dcode}:${c.checkin}:${c.checkout}:${s.adults}:${s.children}:${mode}:${cur}`;
     const lf = await cached<LiveFlight | null>(db, k, 30, () => flightLive({
       origin: c.orig!, destination: c.dcode!, depart: c.checkin, ret: c.checkout, adults: s.adults, children: s.children, currency: cur, mode,
     })).catch((e) => { console.error("flightLive", e); return null; });
-    if (!lf) return null;
-    return { ...c, flight_price: lf.total, flight: { ...(c.flight ?? {}), live: lf, provider: "liteapi", bag_mode: mode } } as Candidate;
+    if (!lf) return strict ? null : { ...c, flight: { ...(c.flight ?? {}), bookable: false } } as Candidate;
+    return { ...c, flight_price: lf.total, flight: { ...(c.flight ?? {}), live: lf, provider: "liteapi", bag_mode: mode, bookable: true } } as Candidate;
   }));
   const ok = res.filter((c): c is Candidate => !!c);
-  if (!ok.length) throw new Error("לא נמצאו טיסות עם הכבודה המבוקשת בתאריכים הזולים");
+  if (!ok.length) throw new Error(strict ? "לא נמצאו טיסות עם הכבודה המבוקשת בתאריכים הזולים" : "לא נמצאו טיסות זמינות בתאריכים הזולים");
   return ok;
 }
 
@@ -103,7 +107,8 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
         link: aviasalesLink(c.orig, c.dcode, c.checkin, c.checkout, s.adults, s.children) };
     }
     const mode = (s.bag_mode ?? "none") as BagMode;
-    if (mode !== "none") cands = await liveFlights(db, s, cands, mode);
+    await set({ progress: 15 });
+    cands = await liveFlights(db, s, cands, mode);
     await set({ status: "verifying", progress: 25 });
     const rows: any[] = [];
     let done = 0;
@@ -128,7 +133,8 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
       await set({ progress: 25 + Math.round((65 * done) / cands.length) });
     }));
     // Rank: cheapest total (flight + hotel) first; ties → higher guest rating. One offer per hotel.
-    rows.sort((a, b) => (a.total - b.total) || ((b.hotel_rating ?? 0) - (a.hotel_rating ?? 0)));
+    // In-app bookable (live-priced) offers before estimate-only ones.
+    rows.sort((a, b) => (Number(!!b.flight?.live) - Number(!!a.flight?.live)) || (a.total - b.total) || ((b.hotel_rating ?? 0) - (a.hotel_rating ?? 0)));
     const seen = new Set<string>();
     const perDest: Record<string, number> = {};
     const top = rows.filter((r) => {

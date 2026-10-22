@@ -543,7 +543,12 @@ class _FlightCheckoutScreenState extends ConsumerState<FlightCheckoutScreen> {
       final paid = await Navigator.of(context).push<bool>(_fade(PaymentWebViewScreen(
         secretKey: q['secret_key'], sandbox: q['sandbox'] == true,
         amount: _price(q['price'] as num?, q['currency'] ?? _cur),
-        route: (_live['segments'] as List?)?.isNotEmpty == true ? '${widget.offer['flight']['origin']} ⇄ ${widget.offer['flight']['destination']}' : null,
+        route: '${widget.offer['flight']['origin']} ⇄ ${widget.offer['flight']['destination']}',
+        summary: [
+          ('טיסה', '${_live['airline'] ?? ''} · ${widget.offer['flight']['origin']} ⇄ ${widget.offer['flight']['destination']}'),
+          ('נוסעים', [for (final p in _pax) '${p.first.text.trim()} ${p.last.text.trim()}'.toUpperCase()].join(', ')),
+          if (_bags || _live['checked_included'] == true) ('כבודה', 'מזוודה 23 ק״ג'),
+        ],
       )));
       if (paid != true || !mounted) return;
       setState(() => _phase = 'booking');

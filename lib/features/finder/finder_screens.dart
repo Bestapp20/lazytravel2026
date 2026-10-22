@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' show PointMode;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +17,7 @@ import '../../core/widgets/lt_widgets.dart';
 import '../../data/providers.dart';
 
 part 'flight_booking.dart';
+part 'finder_visuals.dart';
 
 TextStyle _t(double size, {FontWeight w = FontWeight.w500, Color c = AppColors.textDark}) =>
     GoogleFonts.notoSansHebrew(fontSize: size, fontWeight: w, color: c);
@@ -304,8 +308,10 @@ class _FinderResultsScreenState extends ConsumerState<FinderResultsScreen> {
     super.dispose();
   }
 
-  String _stage(String? st) => switch (st) {
-        'discovering' => 'מחפש תאריכים ויעדים זולים...',
+  String _stage(String? st, [int p = 0]) => switch (st) {
+        'discovering' when p >= 15 => 'בודק מחירי טיסות חיים...',
+        'discovering' => _search?['destination'] == null ? 'סורק יעדים מסביב לעולם...' : 'מחפש תאריכים זולים...',
+        'verifying' when p >= 70 => 'מדרג את ההצעות הזולות ביותר...',
         'verifying' => 'בודק מחירי מלונות בזמן אמת...',
         'done' => 'מוכן',
         'error' => 'שגיאה',
@@ -326,22 +332,9 @@ class _FinderResultsScreenState extends ConsumerState<FinderResultsScreen> {
             subtitle: s == null ? null : '${s['destination'] ?? 'לכל מקום'} · ${s['adults']} מבוגרים${(s['children'] ?? 0) > 0 ? ' + ${s['children']} ילדים' : ''}',
           ),
           if (!finished)
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: LtCard(
-                child: Column(children: [
-                  Text(_stage(status), style: _t(15, w: FontWeight.w700)),
-                  const SizedBox(height: 14),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: LinearProgressIndicator(
-                      value: ((s?['progress'] ?? 0) as num) / 100,
-                      minHeight: 10,
-                      backgroundColor: AppColors.sectionTint,
-                      color: AppColors.accent,
-                    ),
-                  ),
-                ]),
+            Expanded(
+              child: SingleChildScrollView(
+                child: GlobeLoader(stage: _stage(status, ((s?['progress'] ?? 0) as num).toInt()), progress: ((s?['progress'] ?? 0) as num) / 100),
               ),
             ),
           if (status == 'error' || (status == 'done' && _offers.isEmpty && s?['error'] != null))
@@ -361,73 +354,6 @@ class _FinderResultsScreenState extends ConsumerState<FinderResultsScreen> {
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OfferCard extends StatelessWidget {
-  const _OfferCard({required this.offer, required this.onTap});
-  final Map<String, dynamic> offer;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cur = offer['currency'] as String? ?? 'ILS';
-    final photo = offer['hotel_photo'] as String?;
-    return LtCard(
-      padding: EdgeInsets.zero,
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Stack(children: [
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
-              child: photo == null
-                  ? Container(height: 150, color: AppColors.sectionTint)
-                  : Image.network(photo, height: 150, width: double.infinity, fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(height: 150, color: AppColors.sectionTint)),
-            ),
-            Positioned(
-              top: 10,
-              right: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: AppColors.primaryDark, borderRadius: BorderRadius.circular(20)),
-                child: Text('#${offer['rank']}', style: _t(12, w: FontWeight.w800, c: Colors.white)),
-              ),
-            ),
-          ]),
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Expanded(child: Text(offer['hotel_name'] ?? '', style: _t(16, w: FontWeight.w800), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  if (offer['hotel_stars'] != null) Text('${'★' * (offer['hotel_stars'] as num).round()}', style: _t(13, c: AppColors.warning)),
-                ]),
-                const SizedBox(height: 4),
-                Text('${offer['destination']} · ${_d.format(DateTime.parse(offer['checkin']))} – ${_d.format(DateTime.parse(offer['checkout']))} · ${offer['nights']} לילות',
-                    style: _t(12, c: AppColors.textBody)),
-                const SizedBox(height: 6),
-                if (offer['ai_reason'] != null) Text(offer['ai_reason'], style: _t(12, c: AppColors.textBody)),
-                const SizedBox(height: 10),
-                Row(children: [
-                  if (offer['flight_price'] != null) ...[
-                    const Icon(Icons.flight, size: 16, color: AppColors.accent),
-                    Text(' ${_price(offer['flight_price'], cur)}  ', style: _t(12)),
-                  ],
-                  const Icon(Icons.hotel, size: 16, color: AppColors.accent),
-                  Text(' ${_price(offer['hotel_price'], cur)}', style: _t(12)),
-                  const Spacer(),
-                  Text(_price(offer['total'], cur), style: _t(18, w: FontWeight.w800, c: AppColors.primaryDark)),
-                ]),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -593,7 +519,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
                       TextButton.icon(
                         onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => FlightWebViewScreen(url: link))),
                         icon: const Icon(Icons.open_in_new, size: 16, color: AppColors.textBody),
-                        label: Text('או השווה ב-Aviasales', style: _t(13, c: AppColors.textBody)),
+                        label: Text('השוואה באתר חיצוני (Aviasales)', style: _t(13, c: AppColors.textBody)),
                       ),
                   ]),
                 ),
@@ -611,30 +537,25 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
                   const SizedBox(height: 6),
                   if (flight?['depart'] != null)
                     Text('${flight!['origin']} → ${flight['destination']} · ${flight['depart']} / ${flight['ret']} · ${live?['airline'] ?? flight['airline'] ?? ''}', style: _t(13, c: AppColors.textBody)),
-                  if (live != null) ...[
-                    if ((live['bag_note'] ?? '') != '') Text('🧳 ${live['bag_note']}', style: _t(13, w: FontWeight.w700, c: AppColors.primaryDark)),
-                    Text('${live['fare_family'] ?? ''} · כרטיס ${_price(live['fare_total'], cur)}${(live['bag_total'] ?? 0) > 0 ? ' + כבודה ${_price(live['bag_total'], cur)}' : ''}', style: _t(12, c: AppColors.textBody)),
-                    Text('מחיר חי (LiteAPI), יאומת שוב בתשלום', style: _t(11, c: AppColors.textBody)),
-                    const SizedBox(height: 10),
-                    LtPrimaryButton(
-                      label: 'הזמן טיסה באפליקציה',
-                      icon: Icons.flight_takeoff,
-                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => FlightCheckoutScreen(offer: o, adults: (_search?['adults'] as num?)?.toInt() ?? 1, children: (_search?['children'] as num?)?.toInt() ?? 0),
-                      )),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppColors.sectionTint, borderRadius: BorderRadius.circular(14)),
+                    child: Row(children: [
+                      const Icon(Icons.info_outline, size: 18, color: AppColors.textBody),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text('הטיסה הזו לא זמינה להזמנה באפליקציה כרגע (אין מחיר חי). המחיר משוער.', style: _t(12.5, c: AppColors.textBody))),
+                    ]),
+                  ),
+                  if (link != null)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => FlightWebViewScreen(url: link))),
+                        icon: const Icon(Icons.open_in_new, size: 15, color: AppColors.textBody),
+                        label: Text('השוואה באתר חיצוני (Aviasales)', style: _t(12.5, c: AppColors.textBody)),
+                      ),
                     ),
-                  ] else
-                    Text(o['flight_price'] == null ? 'אין מחיר שמור לטיסה, בדוק באתר' : 'מחיר משוער ממטמון חיפושים, יאומת באתר ההזמנה', style: _t(11, c: AppColors.textBody)),
-                  if (link != null) ...[
-                    const SizedBox(height: 10),
-                    LtSecondaryButton(
-                      label: live != null ? 'השווה ב-Aviasales' : 'הזמן טיסה',
-                      icon: Icons.open_in_new,
-                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => FlightWebViewScreen(url: link),
-                      )),
-                    ),
-                  ],
                 ]),
               ),
             const SizedBox(height: 14),
@@ -695,13 +616,18 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
   }
 }
 
-/// Hosts the LiteAPI payment SDK. Pops `true` when the SDK redirects to the return URL.
+/// Payment step. Card fields live in Stripe's secure Payment Element (PCI, inside an iframe we never read);
+/// everything around them (header, steps, summary, skeleton, pay button, errors) is native Flutter.
+/// Mounts Stripe Elements directly with LiteAPI's publishable key, fetched at runtime from LiteAPI's own
+/// payment-wrapper config endpoint (the same one their SDK uses), so we control appearance + Hebrew locale.
+/// If that fails it falls back to the stock LiteAPI wrapper. Pops `true` when Stripe redirects to the return URL.
 class PaymentWebViewScreen extends StatefulWidget {
-  const PaymentWebViewScreen({super.key, required this.secretKey, required this.sandbox, this.amount, this.route});
+  const PaymentWebViewScreen({super.key, required this.secretKey, required this.sandbox, this.amount, this.route, this.summary});
   final String secretKey;
   final bool sandbox;
   final String? amount;
   final String? route;
+  final List<(String, String)>? summary;
   static const returnUrl = 'https://lazytravel.app/booking-return';
   @override
   State<PaymentWebViewScreen> createState() => _PaymentWebViewScreenState();
@@ -709,23 +635,85 @@ class PaymentWebViewScreen extends StatefulWidget {
 
 class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
   late final WebViewController _c;
+  bool _ready = false, _complete = false, _paying = false, _fallback = false;
+  String? _error;
+  double _h = 320;
+
+  String get _env => widget.sandbox ? 'sandbox' : 'live';
+
+  String get _html => '''<!doctype html><html dir="rtl" lang="he"><head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>html,body{margin:0;padding:0;background:transparent;overscroll-behavior:none}
+#pay{padding:2px 2px 8px}.lp-submit-button-wrapper{display:none}</style>
+<script src="https://js.stripe.com/v3/"></script></head><body><div id="pay"></div><script>
+var stripe,elements,el;
+function post(o){LT.postMessage(JSON.stringify(o))}
+function size(){post({t:'h',h:document.body.scrollHeight})}
+new ResizeObserver(size).observe(document.body);
+async function go(){
+ try{
+  var r=await fetch('https://payment-wrapper.liteapi.travel/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({publicKey:'$_env'})});
+  var cfg=await r.json(); if(!cfg.publicKey||!window.Stripe) throw new Error('cfg');
+  stripe=Stripe(cfg.publicKey,{locale:'he'});
+  elements=stripe.elements({clientSecret:'${widget.secretKey}',locale:'he',
+   fonts:[{cssSrc:'https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@400;500;700&display=swap'}],
+   appearance:{theme:'flat',labels:'floating',variables:{colorPrimary:'#2DBFAD',colorBackground:'#FFFFFF',colorText:'#0D2B35',
+    colorTextSecondary:'#4A7A87',colorDanger:'#FF6B4A',fontFamily:'"Noto Sans Hebrew",sans-serif',fontSizeBase:'15px',
+    borderRadius:'16px',spacingUnit:'4px',gridRowSpacing:'14px'},
+    rules:{'.Input':{border:'1.5px solid #C8E8E8',boxShadow:'none',padding:'14px'},'.Input:focus':{border:'1.5px solid #2DBFAD',boxShadow:'0 0 0 3px rgba(45,191,173,.18)'},
+     '.Label':{color:'#4A7A87',fontWeight:'500'},'.Tab':{border:'1.5px solid #C8E8E8',boxShadow:'none'},'.Tab--selected':{borderColor:'#2DBFAD',color:'#1B4F5C'},
+     '.Block':{boxShadow:'none',border:'1.5px solid #C8E8E8'}}}});
+  el=elements.create('payment',{layout:{type:'tabs'},wallets:{applePay:'never',googlePay:'never'},business:{name:'LAZYTRAVEL'}});
+  el.on('ready',function(){post({t:'ready'});size()});
+  el.on('change',function(e){post({t:'complete',v:!!e.complete})});
+  el.on('loaderror',function(){fallback()});
+  el.mount('#pay');
+ }catch(e){fallback()}
+}
+function fallback(){
+ post({t:'fallback'});
+ document.getElementById('pay').innerHTML='';
+ var st=document.createElement('style');st.textContent='.lp-submit-button-wrapper{display:block}.lp-submit-button{background:linear-gradient(135deg,#3DD6C6,#2DBFAD,#1B4F5C);color:#fff;border:0;border-radius:16px;padding:14px;width:100%;font-size:16px;font-weight:700;margin-top:12px}';
+ document.head.appendChild(st);
+ var s=document.createElement('script');s.src='https://payment-wrapper.liteapi.travel/dist/liteAPIPayment.js?v=a1';
+ s.onload=function(){new LiteAPIPayment({publicKey:'$_env',targetElement:'#pay',secretKey:'${widget.secretKey}',
+  returnUrl:'${PaymentWebViewScreen.returnUrl}',submitButton:{text:'שלם'}}).handlePayment();
+  setTimeout(function(){post({t:'ready'});size()},3000)};
+ document.head.appendChild(s);
+}
+async function pay(){
+ var r=await stripe.confirmPayment({elements:elements,confirmParams:{return_url:'${PaymentWebViewScreen.returnUrl}'}});
+ if(r.error) post({t:'error',m:r.error.message||''});
+}
+go();
+</script></body></html>''';
 
   @override
   void initState() {
     super.initState();
-    final html = '''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<script src="https://payment-wrapper.liteapi.travel/dist/liteAPIPayment.js?v=a1"></script></head>
-<body style="font-family:sans-serif;margin:16px;background:#F0FAFA;color:#0D2B35">
-${widget.sandbox ? '<p style="background:#fff3cd;padding:10px 12px;border-radius:12px;font-size:14px">🧪 Sandbox: card 4242 4242 4242 4242, any future date, any CVC</p>' : ''}
-<style>#pay{background:#fff;border-radius:18px;padding:14px;box-shadow:0 4px 18px rgba(27,79,92,.08);border:1.5px solid #C8E8E8} button{background:linear-gradient(135deg,#3DD6C6,#2DBFAD,#1B4F5C)!important;color:#fff!important;border:0!important;border-radius:16px!important;padding:14px!important;width:100%;font-size:16px!important;font-weight:700;margin-top:12px}</style>
-<div id="pay"></div>
-<script>
-new LiteAPIPayment({publicKey:'${widget.sandbox ? 'sandbox' : 'live'}',appearance:{theme:'flat'},
- options:{business:{name:'LAZYTRAVEL'}},targetElement:'#pay',
- secretKey:'${widget.secretKey}',returnUrl:'${PaymentWebViewScreen.returnUrl}'}).handlePayment();
-</script></body></html>''';
     _c = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.transparent)
+      ..enableZoom(false)
+      ..addJavaScriptChannel('LT', onMessageReceived: (m) {
+        final o = jsonDecode(m.message) as Map;
+        if (!mounted) return;
+        setState(() {
+          switch (o['t']) {
+            case 'ready':
+              _ready = true;
+            case 'complete':
+              _complete = o['v'] == true;
+            case 'fallback':
+              _fallback = true;
+            case 'h':
+              _h = math.max(200, (o['h'] as num).toDouble() + 16);
+            case 'error':
+              _paying = false;
+              _error = o['m'] as String?;
+          }
+        });
+      })
       ..setNavigationDelegate(NavigationDelegate(onNavigationRequest: (req) {
         if (req.url.startsWith(PaymentWebViewScreen.returnUrl)) {
           Navigator.of(context).pop(true);
@@ -733,36 +721,151 @@ new LiteAPIPayment({publicKey:'${widget.sandbox ? 'sandbox' : 'live'}',appearanc
         }
         return NavigationDecision.navigate;
       }))
-      ..loadHtmlString(html, baseUrl: 'https://lazytravel.app/');
+      ..loadHtmlString(_html, baseUrl: 'https://lazytravel.app/');
+  }
+
+  Future<void> _pay() async {
+    if (_paying || !_ready) return;
+    setState(() {
+      _paying = true;
+      _error = null;
+    });
+    await _c.runJavaScript('pay()');
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.route == null) {
-      return Scaffold(
-        appBar: AppBar(title: Text('תשלום מאובטח', style: _t(17, w: FontWeight.w700))),
-        body: WebViewWidget(controller: _c),
-      );
-    }
     return Scaffold(
       backgroundColor: AppColors.bgLight,
       body: Column(children: [
-        _SkyHeader(title: 'תשלום מאובטח', subtitle: '${widget.route} · ${widget.amount ?? ''}', height: 170, child: const _Steps(1)),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-          child: Row(children: [
-            const Icon(Icons.lock, size: 16, color: AppColors.success),
-            const SizedBox(width: 6),
-            Expanded(child: Text('פרטי הכרטיס מוצפנים ונשלחים ישירות לספק התשלום', style: _t(12, c: AppColors.textBody))),
-            if (widget.amount != null) Text(widget.amount!, style: _t(16, w: FontWeight.w800, c: AppColors.primaryDark)),
-          ]),
+        widget.route != null
+            ? _SkyHeader(title: 'תשלום מאובטח', subtitle: widget.route, height: 170, child: const _Steps(1))
+            : _SkyHeader(title: 'תשלום מאובטח', subtitle: widget.amount, height: 130),
+        Expanded(
+          child: ListView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+            children: [
+              _PaySummary(rows: widget.summary, amount: widget.amount),
+              const SizedBox(height: 14),
+              if (widget.sandbox)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(color: const Color(0xFFFFF6DB), borderRadius: BorderRadius.circular(14)),
+                  child: Text('🧪 מצב בדיקה: כרטיס 4242 4242 4242 4242, כל תוקף עתידי וכל CVC', style: _t(12.5, c: const Color(0xFF7A5B00))),
+                ),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: AppColors.border, width: 1.5),
+                    boxShadow: [BoxShadow(color: AppColors.primaryDark.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 4))]),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(Icons.credit_card, color: AppColors.accent, size: 20),
+                    const SizedBox(width: 8),
+                    Text('פרטי כרטיס', style: _t(15, w: FontWeight.w700)),
+                    const Spacer(),
+                    const Icon(Icons.lock, size: 14, color: AppColors.success),
+                    const SizedBox(width: 4),
+                    Text('מוצפן', style: _t(12, c: AppColors.success)),
+                  ]),
+                  const SizedBox(height: 10),
+                  Stack(children: [
+                    Opacity(opacity: _ready ? 1 : 0, child: SizedBox(height: _h, child: WebViewWidget(controller: _c))),
+                    if (!_ready) const Positioned.fill(child: _PaySkeleton()),
+                  ]),
+                ]),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: _t(13, c: AppColors.danger)),
+              ],
+              const SizedBox(height: 10),
+              Text('פרטי הכרטיס נשלחים ישירות לספק התשלום המאובטח (Stripe דרך Nuitee). LAZYTRAVEL לא רואה ולא שומרת אותם.',
+                  style: _t(11.5, c: AppColors.textBody)),
+            ],
+          ),
         ),
-        Expanded(child: WebViewWidget(controller: _c)),
+        if (!_fallback)
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Opacity(
+                opacity: _ready && _complete && !_paying ? 1 : 0.55,
+                child: LtPrimaryButton(label: _paying ? 'מעבד תשלום...' : 'שלם ${widget.amount ?? ''}', onPressed: _pay),
+              ),
+            ),
+          ),
       ]),
     );
   }
 }
 
+class _PaySummary extends StatelessWidget {
+  const _PaySummary({this.rows, this.amount});
+  final List<(String, String)>? rows;
+  final String? amount;
+  @override
+  Widget build(BuildContext context) {
+    final r = rows ?? const <(String, String)>[];
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(22), border: Border.all(color: AppColors.border, width: 1.5)),
+      child: Column(children: [
+        for (final x in r)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(x.$1, style: _t(13, c: AppColors.textBody)),
+              const SizedBox(width: 12),
+              Expanded(child: Text(x.$2, style: _t(13.5, w: FontWeight.w600), textAlign: TextAlign.left)),
+            ]),
+          ),
+        if (r.isNotEmpty) const Divider(height: 14, color: AppColors.border),
+        Row(children: [
+          Text('לתשלום עכשיו', style: _t(15, w: FontWeight.w700)),
+          const Spacer(),
+          Text(amount ?? '', style: _t(22, w: FontWeight.w800, c: AppColors.primaryDark)),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _PaySkeleton extends StatefulWidget {
+  const _PaySkeleton();
+  @override
+  State<_PaySkeleton> createState() => _PaySkeletonState();
+}
+
+class _PaySkeletonState extends State<_PaySkeleton> with SingleTickerProviderStateMixin {
+  late final AnimationController _a = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat(reverse: true);
+  @override
+  void dispose() {
+    _a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget bar(double h, {double? w}) => Container(
+        height: h, width: w, margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(color: AppColors.sectionTint, borderRadius: BorderRadius.circular(16)));
+    return FadeTransition(
+      opacity: Tween(begin: 0.45, end: 1.0).animate(_a),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        bar(52),
+        Row(children: [Expanded(child: bar(52)), const SizedBox(width: 10), Expanded(child: bar(52))]),
+        bar(52),
+        Align(alignment: Alignment.centerRight, child: bar(14, w: 140)),
+      ]),
+    );
+  }
+}
 
 /// Aviasales booking page inside the app. Uses a full WebView (JS + DOM storage, mobile Chrome UA)
 /// instead of a Custom Tab, which rendered blank on first launch. Falls back to the external browser.
@@ -807,21 +910,27 @@ class _FlightWebViewScreenState extends State<FlightWebViewScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('הזמנת טיסה', style: _t(17, w: FontWeight.w700)),
-        actions: [
-          IconButton(
-            tooltip: 'פתח בדפדפן',
-            icon: const Icon(Icons.open_in_browser),
-            onPressed: () => launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication),
+      backgroundColor: AppColors.bgLight,
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(104 + MediaQuery.of(context).padding.top + 34),
+        child: Column(children: [
+          _SkyHeader(title: 'השוואת מחירים', subtitle: 'Aviasales · אתר חיצוני', height: 104),
+          Container(
+            width: double.infinity,
+            color: const Color(0xFFFFF6DB),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(children: [
+              const Icon(Icons.open_in_new, size: 15, color: Color(0xFF7A5B00)),
+              const SizedBox(width: 6),
+              Expanded(child: Text('אתר חיצוני להשוואה. הזמנה כאן לא מתבצעת דרך LAZYTRAVEL', style: _t(11.5, c: const Color(0xFF7A5B00)))),
+              GestureDetector(
+                onTap: () => launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication),
+                child: Text('פתח בדפדפן', style: _t(11.5, w: FontWeight.w700, c: AppColors.primaryDark)),
+              ),
+            ]),
           ),
-        ],
-        bottom: _progress < 100
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(3),
-                child: LinearProgressIndicator(value: _progress / 100, minHeight: 3, color: AppColors.accent),
-              )
-            : null,
+          if (_progress < 100) LinearProgressIndicator(value: _progress / 100, minHeight: 3, color: AppColors.accent) else const SizedBox(height: 3),
+        ]),
       ),
       body: _error != null
           ? Center(
