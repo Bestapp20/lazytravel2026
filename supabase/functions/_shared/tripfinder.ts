@@ -127,9 +127,8 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
       done++;
       await set({ progress: 25 + Math.round((65 * done) / cands.length) });
     }));
-    // Rank: price per night with a quality bonus; one offer per hotel.
-    const score = (r: any) => (r.total / r.nights) * (1 - Math.min(0.25, ((r.hotel_rating ?? 7) - 7) * 0.08));
-    rows.sort((a, b) => score(a) - score(b));
+    // Rank: cheapest total (flight + hotel) first; ties → higher guest rating. One offer per hotel.
+    rows.sort((a, b) => (a.total - b.total) || ((b.hotel_rating ?? 0) - (a.hotel_rating ?? 0)));
     const seen = new Set<string>();
     const perDest: Record<string, number> = {};
     const top = rows.filter((r) => {
@@ -138,9 +137,9 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
     }).slice(0, 10);
     top.forEach((r, i) => {
       r.rank = i + 1;
-      const perNight = Math.round(r.total / r.nights);
+      const hotelPerNight = Math.round(r.hotel_price / r.nights);
       const bagNote = r.flight?.live?.bag_note;
-      r.ai_reason = (bagNote ? `🧳 ${bagNote}. ` : "") + (r.flight_price ? `טיסה ${Math.round(r.flight_price)} + מלון ${Math.round(r.hotel_price)}. ` : "") + `${r.nights} לילות, ${perNight} ${r.currency} ללילה` +
+      r.ai_reason = (bagNote ? `🧳 ${bagNote}. ` : "") + (r.flight_price ? `טיסה ${Math.round(r.flight_price)} + מלון ${Math.round(r.hotel_price)}. ` : "") + `${r.nights} לילות, מלון ${hotelPerNight} ${r.currency} ללילה` +
         (r.hotel_rating ? `, דירוג אורחים ${r.hotel_rating}` : "") + (r.refundable ? ", ביטול חינם" : "");
     });
     if (top.length) await db.from("trip_offers").insert(top);

@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
     return json({
       booking_id: bk.id, secret_key: pre.secretKey, price: Number(pre.price), currency: pre.currency, sandbox: isSandbox(),
       bags_attached: bagsAttached, baggage_amount: pre.booking?.pricing?.baggageAmount ?? 0, fare_family: live.fare_family,
-      segments: live.segments,
+      segments: live.segments, live,
     });
   } catch (err) {
     if (err instanceof Response) return err;

@@ -1,16 +1,19 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/lt_widgets.dart';
 import '../../data/providers.dart';
+
+part 'flight_booking.dart';
 
 TextStyle _t(double size, {FontWeight w = FontWeight.w500, Color c = AppColors.textDark}) =>
     GoogleFonts.notoSansHebrew(fontSize: size, fontWeight: w, color: c);
@@ -129,8 +132,9 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
         'date_from': f.format(win.start),
         'date_to': f.format(win.end),
         'bag_mode': _bagMode,
-        'nights_min': _nights.start.round(),
-        'nights_max': _nights.end.round(),
+        // Exact dates: the chosen range IS the trip.
+        'nights_min': _dateMode == 'exact' && _range != null ? _range!.duration.inDays : _nights.start.round(),
+        'nights_max': _dateMode == 'exact' && _range != null ? _range!.duration.inDays : _nights.end.round(),
         'adults': _adults,
         'children': _children,
         'budget': num.tryParse(_budget.text.trim()),
@@ -215,6 +219,9 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
                     padding: const EdgeInsets.only(top: 6),
                     child: Text('נבדוק מחיר חי כולל כבודה לתאריכים הזולים (לוקח עוד כמה שניות)', style: _t(12, c: AppColors.textBody)),
                   ),
+                if (_dateMode == 'exact' && _range != null)
+                  _label('אורך הטיול: ${_range!.duration.inDays} לילות (לפי התאריכים שבחרת)')
+                else ...[
                 _label('אורך הטיול (לא חובה): ${_nights.start.round()}–${_nights.end.round()} לילות'),
                 RangeSlider(
                   values: _nights,
@@ -224,6 +231,7 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
                   activeColor: AppColors.accent,
                   onChanged: (v) => setState(() => _nights = v),
                 ),
+                ],
                 _label('נוסעים'),
                 LtCard(
                   child: Column(children: [
@@ -554,7 +562,43 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
             if (o['hotel_photo'] != null)
               ClipRRect(borderRadius: BorderRadius.circular(18), child: Image.network(o['hotel_photo'], height: 190, fit: BoxFit.cover)),
             const SizedBox(height: 14),
-            if (o['flight_price'] != null || flight?['origin'] != null)
+            if (live != null) ...[
+              Row(children: [
+                const Icon(Icons.flight_takeoff, color: AppColors.accent),
+                const SizedBox(width: 8),
+                Text('טיסה', style: _t(16, w: FontWeight.w800)),
+                const Spacer(),
+                Text(_price(o['flight_price'], cur), style: _t(18, w: FontWeight.w800, c: AppColors.primaryDark)),
+              ]),
+              const SizedBox(height: 10),
+              _FlightTicket(
+                live: live, cur: cur, pax: ((_search?['adults'] as num?) ?? 1).toInt() + ((_search?['children'] as num?) ?? 0).toInt(),
+                footer: Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    if ((live['bag_note'] ?? '') != '') Text('🧳 ${live['bag_note']}', style: _t(13, w: FontWeight.w700, c: AppColors.primaryDark)),
+                    Text('כרטיס ${_price(live['fare_total'], cur)}${(live['bag_total'] ?? 0) > 0 ? ' + כבודה ${_price(live['bag_total'], cur)}' : ''} · מחיר חי, יאומת שוב לפני התשלום', style: _t(11, c: AppColors.textBody)),
+                    const SizedBox(height: 12),
+                    LtPrimaryButton(
+                      label: 'הזמן טיסה באפליקציה',
+                      icon: Icons.flight_takeoff,
+                      onPressed: () async {
+                        final add = await Navigator.of(context).push<bool>(_fade(
+                          FlightCheckoutScreen(offer: o, adults: (_search?['adults'] as num?)?.toInt() ?? 1, children: (_search?['children'] as num?)?.toInt() ?? 0),
+                        ));
+                        if (add == true) _createTrip();
+                      },
+                    ),
+                    if (link != null)
+                      TextButton.icon(
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => FlightWebViewScreen(url: link))),
+                        icon: const Icon(Icons.open_in_new, size: 16, color: AppColors.textBody),
+                        label: Text('או השווה ב-Aviasales', style: _t(13, c: AppColors.textBody)),
+                      ),
+                  ]),
+                ),
+              ),
+            ] else if (o['flight_price'] != null || flight?['origin'] != null)
               LtCard(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
@@ -653,9 +697,11 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
 
 /// Hosts the LiteAPI payment SDK. Pops `true` when the SDK redirects to the return URL.
 class PaymentWebViewScreen extends StatefulWidget {
-  const PaymentWebViewScreen({super.key, required this.secretKey, required this.sandbox});
+  const PaymentWebViewScreen({super.key, required this.secretKey, required this.sandbox, this.amount, this.route});
   final String secretKey;
   final bool sandbox;
+  final String? amount;
+  final String? route;
   static const returnUrl = 'https://lazytravel.app/booking-return';
   @override
   State<PaymentWebViewScreen> createState() => _PaymentWebViewScreenState();
@@ -669,8 +715,9 @@ class _PaymentWebViewScreenState extends State<PaymentWebViewScreen> {
     super.initState();
     final html = '''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://payment-wrapper.liteapi.travel/dist/liteAPIPayment.js?v=a1"></script></head>
-<body style="font-family:sans-serif;margin:16px">
-${widget.sandbox ? '<p style="background:#fff3cd;padding:8px;border-radius:8px">Sandbox: card 4242 4242 4242 4242, any future date, any CVC</p>' : ''}
+<body style="font-family:sans-serif;margin:16px;background:#F0FAFA;color:#0D2B35">
+${widget.sandbox ? '<p style="background:#fff3cd;padding:10px 12px;border-radius:12px;font-size:14px">🧪 Sandbox: card 4242 4242 4242 4242, any future date, any CVC</p>' : ''}
+<style>#pay{background:#fff;border-radius:18px;padding:14px;box-shadow:0 4px 18px rgba(27,79,92,.08);border:1.5px solid #C8E8E8} button{background:linear-gradient(135deg,#3DD6C6,#2DBFAD,#1B4F5C)!important;color:#fff!important;border:0!important;border-radius:16px!important;padding:14px!important;width:100%;font-size:16px!important;font-weight:700;margin-top:12px}</style>
 <div id="pay"></div>
 <script>
 new LiteAPIPayment({publicKey:'${widget.sandbox ? 'sandbox' : 'live'}',appearance:{theme:'flat'},
@@ -691,9 +738,27 @@ new LiteAPIPayment({publicKey:'${widget.sandbox ? 'sandbox' : 'live'}',appearanc
 
   @override
   Widget build(BuildContext context) {
+    if (widget.route == null) {
+      return Scaffold(
+        appBar: AppBar(title: Text('תשלום מאובטח', style: _t(17, w: FontWeight.w700))),
+        body: WebViewWidget(controller: _c),
+      );
+    }
     return Scaffold(
-      appBar: AppBar(title: Text('תשלום מאובטח', style: _t(17, w: FontWeight.w700))),
-      body: WebViewWidget(controller: _c),
+      backgroundColor: AppColors.bgLight,
+      body: Column(children: [
+        _SkyHeader(title: 'תשלום מאובטח', subtitle: '${widget.route} · ${widget.amount ?? ''}', height: 170, child: const _Steps(1)),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+          child: Row(children: [
+            const Icon(Icons.lock, size: 16, color: AppColors.success),
+            const SizedBox(width: 6),
+            Expanded(child: Text('פרטי הכרטיס מוצפנים ונשלחים ישירות לספק התשלום', style: _t(12, c: AppColors.textBody))),
+            if (widget.amount != null) Text(widget.amount!, style: _t(16, w: FontWeight.w800, c: AppColors.primaryDark)),
+          ]),
+        ),
+        Expanded(child: WebViewWidget(controller: _c)),
+      ]),
     );
   }
 }
@@ -777,180 +842,3 @@ class _FlightWebViewScreenState extends State<FlightWebViewScreen> {
   }
 }
 
-
-/// In-app flight checkout via LiteAPI/Nuitee (Nuitee is merchant of record). Passenger details → prebook (+bags) → payment SDK → book.
-class FlightCheckoutScreen extends ConsumerStatefulWidget {
-  const FlightCheckoutScreen({super.key, required this.offer, required this.adults, required this.children});
-  final Map<String, dynamic> offer;
-  final int adults;
-  final int children;
-  @override
-  ConsumerState<FlightCheckoutScreen> createState() => _FlightCheckoutScreenState();
-}
-
-class _Pax {
-  final first = TextEditingController();
-  final last = TextEditingController();
-  final birthday = TextEditingController();
-  final passport = TextEditingController();
-  final expiry = TextEditingController();
-  String gender = 'M';
-}
-
-class _FlightCheckoutScreenState extends ConsumerState<FlightCheckoutScreen> {
-  late final List<_Pax> _pax = List.generate(widget.adults + widget.children, (_) => _Pax());
-  final _email = TextEditingController();
-  final _phone = TextEditingController();
-  late bool _bags = (widget.offer['flight']?['live']?['checked_included'] != true) &&
-      widget.offer['flight']?['bag_mode'] == 'checked';
-  bool _busy = false;
-  String? _result;
-  Map<String, dynamic>? _quote;
-
-  @override
-  void initState() {
-    super.initState();
-    _email.text = ref.read(supabaseProvider)?.auth.currentUser?.email ?? '';
-  }
-
-  bool _validDate(String s) => RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(s.trim());
-
-  Future<void> _pay() async {
-    if (_busy) return;
-    for (final p in _pax) {
-      if (p.first.text.trim().isEmpty || p.last.text.trim().isEmpty || !_validDate(p.birthday.text)) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('מלא שם (באנגלית) ותאריך לידה YYYY-MM-DD לכל נוסע')));
-        return;
-      }
-    }
-    if (!_email.text.contains('@') || _phone.text.trim().length < 7) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('מלא מייל וטלפון')));
-      return;
-    }
-    final client = ref.read(supabaseProvider)!;
-    setState(() => _busy = true);
-    try {
-      final phone = _phone.text.trim().replaceAll(RegExp(r'[^0-9]'), '').replaceFirst(RegExp(r'^(972|0)'), '');
-      final res = await client.functions.invoke('flight-prebook', body: {
-        'offer_id': widget.offer['id'],
-        'with_bags': _bags,
-        'contact': {
-          'firstName': _pax.first.first.text.trim(), 'lastName': _pax.first.last.text.trim(),
-          'email': _email.text.trim(), 'phoneCountryCode': '972', 'phoneNumber': phone,
-        },
-        'passengers': [
-          for (var i = 0; i < _pax.length; i++)
-            {
-              'passengerType': i < widget.adults ? 0 : 1,
-              'firstName': _pax[i].first.text.trim(),
-              'lastName': _pax[i].last.text.trim(),
-              'birthday': _pax[i].birthday.text.trim(),
-              'gender': _pax[i].gender,
-              'nationality': 'IL',
-              if (_pax[i].passport.text.trim().isNotEmpty) ...{
-                'documentType': 'passport',
-                'documentNumber': _pax[i].passport.text.trim(),
-                'documentIssueCountry': 'IL',
-                if (_validDate(_pax[i].expiry.text)) 'documentExpiry': _pax[i].expiry.text.trim(),
-              },
-            },
-        ],
-      });
-      final q = Map<String, dynamic>.from(res.data as Map);
-      if (q['error'] != null) throw Exception(q['error']);
-      setState(() => _quote = q);
-      if (!mounted) return;
-      final paid = await Navigator.of(context).push<bool>(MaterialPageRoute(
-        builder: (_) => PaymentWebViewScreen(secretKey: q['secret_key'], sandbox: q['sandbox'] == true),
-      ));
-      if (paid != true) return;
-      final b = await client.functions.invoke('flight-book', body: {'booking_id': q['booking_id']});
-      final r = Map<String, dynamic>.from(b.data as Map);
-      if (r['error'] != null) throw Exception(r['error']);
-      final st = '${r['status']}'.toUpperCase();
-      setState(() => _result = '${st == 'CONFIRMED' ? 'מאושר' : st.startsWith('PENDING') ? 'ממתין לאישור חברת התעופה' : st} · ${r['booking_ref'] ?? r['booking_id']}${r['pnr'] != null ? ' · PNR ${r['pnr']}' : ''}');
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('שגיאה: $e')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Widget _tf(TextEditingController c, String hint, {TextInputType? kb}) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: TextField(
-          controller: c,
-          keyboardType: kb,
-          decoration: InputDecoration(hintText: hint, isDense: true, filled: true, fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-        ),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final f = widget.offer['flight'] as Map;
-    final live = f['live'] as Map? ?? {};
-    final cur = widget.offer['currency'] as String? ?? 'ILS';
-    return Scaffold(
-      backgroundColor: AppColors.bgLight,
-      body: ListView(padding: EdgeInsets.zero, children: [
-        _Header(title: 'הזמנת טיסה', subtitle: '${f['origin']} ⇄ ${f['destination']} · ${f['depart']} / ${f['ret']}'),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            LtCard(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${live['airline'] ?? ''} · ${live['fare_family'] ?? ''}', style: _t(15, w: FontWeight.w800)),
-                for (final s in (live['segments'] as List? ?? []))
-                  Text('${s['flight']}  ${s['from']} → ${s['to']}  ${(s['dep'] ?? '').toString().replaceFirst('T', ' ').substring(0, 16)}', style: _t(12, c: AppColors.textBody)),
-                const SizedBox(height: 6),
-                Text(live['checked_included'] == true ? '🧳 מזוודה כלולה במחיר' : '🎒 ${live['carry_on'] == true ? 'תיק עלייה כלול' : 'ללא כבודה כלולה'}', style: _t(13)),
-                if (live['checked_included'] != true)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: _bags,
-                    activeColor: AppColors.accent,
-                    onChanged: _busy ? null : (v) => setState(() => _bags = v),
-                    title: Text('הוסף מזוודה לכל נוסע (הלוך וחזור)', style: _t(14)),
-                    subtitle: Text('המחיר הסופי יחושב מול חברת התעופה', style: _t(11, c: AppColors.textBody)),
-                  ),
-                Text('מחיר משוער: ${_price(live['fare_total'], cur)}', style: _t(13, c: AppColors.textBody)),
-                if (_quote != null)
-                  Text('לתשלום: ${_price(_quote!['price'], _quote!['currency'] ?? cur)}${(_quote!['baggage_amount'] ?? 0) > 0 ? ' (כולל כבודה ${_price(_quote!['baggage_amount'], _quote!['currency'] ?? cur)})' : ''}',
-                      style: _t(15, w: FontWeight.w800, c: AppColors.primaryDark)),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            for (var i = 0; i < _pax.length; i++) ...[
-              Text('נוסע ${i + 1} ${i < widget.adults ? '(מבוגר)' : '(ילד)'} – כמו בדרכון, באנגלית', style: _t(14, w: FontWeight.w700)),
-              const SizedBox(height: 8),
-              _tf(_pax[i].first, 'First name'),
-              _tf(_pax[i].last, 'Last name'),
-              _tf(_pax[i].birthday, 'Birthday YYYY-MM-DD', kb: TextInputType.datetime),
-              Row(children: [
-                LtChip(label: 'M', selected: _pax[i].gender == 'M', onTap: () => setState(() => _pax[i].gender = 'M')),
-                const SizedBox(width: 8),
-                LtChip(label: 'F', selected: _pax[i].gender == 'F', onTap: () => setState(() => _pax[i].gender = 'F')),
-              ]),
-              const SizedBox(height: 8),
-              _tf(_pax[i].passport, 'Passport number (optional)'),
-              _tf(_pax[i].expiry, 'Passport expiry YYYY-MM-DD (optional)', kb: TextInputType.datetime),
-              const SizedBox(height: 10),
-            ],
-            Text('פרטי קשר', style: _t(14, w: FontWeight.w700)),
-            const SizedBox(height: 8),
-            _tf(_email, 'Email', kb: TextInputType.emailAddress),
-            _tf(_phone, 'טלפון נייד, למשל 0501234567', kb: TextInputType.phone),
-            const SizedBox(height: 12),
-            if (_result != null)
-              LtCard(child: Text('✅ הטיסה הוזמנה: $_result', style: _t(14, w: FontWeight.w700, c: AppColors.success)))
-            else
-              LtPrimaryButton(label: _busy ? 'מעבד...' : 'המשך לתשלום', icon: Icons.lock_outline, onPressed: _busy ? null : _pay),
-            const SizedBox(height: 8),
-            Text('התשלום מתבצע מול Nuitee (LiteAPI), שגובה את הכסף ומנפיק את הכרטיס.', style: _t(11, c: AppColors.textBody)),
-          ]),
-        ),
-      ]),
-    );
-  }
-}

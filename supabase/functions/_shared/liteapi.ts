@@ -86,7 +86,8 @@ export type BagMode = "none" | "checked" | "carryon";
 export type LiveFlight = {
   offer_id: string; total: number; fare_total: number; bag_total: number; currency: string;
   fare_family?: string; airline?: string; carry_on: boolean; checked_included: boolean;
-  checked_kg?: number; bag_note: string; segments: { from: string; to: string; dep: string; flight?: string; dir?: string }[];
+  checked_kg?: number; bag_note: string; segments: { from: string; to: string; dep: string; arr?: string; min?: number; flight?: string; dir?: string }[];
+  logo?: string; carrier?: string; legs?: { dir: string; min: number; day_change: number }[];
 };
 
 /** Live round-trip search; returns the cheapest offer satisfying the bag mode (bags priced per passenger, estimate). */
@@ -122,7 +123,7 @@ export async function flightLive(p: {
       const total = Math.round((fare + bag) * 100) / 100;
       if (best && best.total <= total) continue;
       const segs = (j.segments ?? []).map((s: any) => ({
-        from: s.originCode, to: s.destinationCode, dep: s.departureTime, dir: s.direction,
+        from: s.originCode, to: s.destinationCode, dep: s.departureTime, arr: s.arrivalTime, min: s.duration?.minutes, dir: s.direction,
         flight: `${s.carrier?.marketingCode ?? ""}${s.flight?.marketingNumber ?? ""}`,
       }));
       best = {
@@ -130,6 +131,8 @@ export async function flightLive(p: {
         fare_family: o.fare?.family, airline: j.segments?.[0]?.carrier?.marketingName,
         carry_on: !!b.hasCarryOnBag, checked_included: !!b.hasCheckedBag, checked_kg: inclChecked?.weightKg ?? paidChecked?.weightKg,
         bag_note: note, segments: segs,
+        logo: j.segments?.[0]?.carrier?.marketingLogo, carrier: j.segments?.[0]?.carrier?.marketingCode,
+        legs: (j.legDurations ?? []).map((l: any) => ({ dir: l.direction, min: l.duration?.minutes, day_change: l.dayChange ?? 0 })),
       };
     }
   }
