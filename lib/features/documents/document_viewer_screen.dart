@@ -36,6 +36,7 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
     try {
       final docs = await ref.read(documentsRepositoryProvider)?.forTrip(widget.tripId);
       final doc = docs?.where((d) => d.id == widget.docId).firstOrNull;
+      if (!mounted) return;
       if (doc == null) {
         setState(() => _error = 'המסמך לא נמצא');
         return;
@@ -45,12 +46,13 @@ class _DocumentViewerScreenState extends ConsumerState<DocumentViewerScreen> {
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/${doc.id}_${doc.storagePath.split('/').last}');
       await file.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
       setState(() {
         _bytes = bytes;
         _cache = file;
       });
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.toString());
     }
   }
 

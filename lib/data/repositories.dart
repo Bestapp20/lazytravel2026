@@ -347,4 +347,40 @@ class PlacesRepository {
       photoReference: map['photo_reference'] as String?,
     );
   }
+
+  /// Top places for a category near a point (photos resolved server-side).
+  Future<List<PlaceSuggestion>> topPlaces(String query, {double? lat, double? lng, int limit = 5}) async {
+    final res = await _client.functions.invoke('places-search', body: {
+      'query': query,
+      'lat': ?lat,
+      'lng': ?lng,
+      'limit': limit,
+      'with_photos': true,
+    });
+    final data = res.data;
+    final results = (data is Map ? data['results'] : null) as List? ?? [];
+    return results.map((r) {
+      final m = Map<String, dynamic>.from(r as Map);
+      return PlaceSuggestion(
+        placeId: m['place_id'] as String? ?? '',
+        name: m['name'] as String? ?? '',
+        subtitle: m['address'] as String?,
+        address: m['address'] as String?,
+        lat: (m['lat'] as num?)?.toDouble(),
+        lng: (m['lng'] as num?)?.toDouble(),
+        rating: m['rating'] as num?,
+        photoReference: m['photo_reference'] as String?,
+        photoUrl: m['photo_url'] as String?,
+        types: (m['types'] as List?)?.map((e) => '$e').toList(),
+      );
+    }).toList();
+  }
+
+  Future<PlaceFull?> detailsFull(String placeId) async {
+    final res = await _client.functions.invoke('places-search', body: {'place_id': placeId, 'full': true});
+    final data = res.data;
+    final m = data is Map ? data['result'] : null;
+    if (m is! Map) return null;
+    return PlaceFull.fromMap(Map<String, dynamic>.from(m));
+  }
 }

@@ -127,3 +127,50 @@ export const INTEREST_QUERIES: Record<string, string> = {
   kids: "family friendly attractions",
   hidden: "hidden gems local favorites",
 };
+
+export type PlaceFull = PlaceHit & {
+  photos: string[];
+  hours?: string[];
+  open_now?: boolean;
+  summary?: string;
+  website?: string;
+  phone?: string;
+  user_rating_count?: number;
+  reviews: { author?: string; rating?: number; text: string; when?: string }[];
+};
+
+/** Rich details for the place sheet: up to 6 photo URIs (resolved server-side), hours, summary, reviews. */
+export async function placeDetailsFull(placeId: string, lang = "he"): Promise<PlaceFull | null> {
+  const fields = [
+    "id", "displayName", "formattedAddress", "location", "rating", "userRatingCount", "priceLevel", "types",
+    "photos", "googleMapsUri", "regularOpeningHours", "editorialSummary", "websiteUri",
+    "internationalPhoneNumber", "reviews",
+  ].join(",");
+  const res = await fetch(`${PLACES_NEW}/places/${encodeURIComponent(placeId)}?languageCode=${lang}`, {
+    headers: { "X-Goog-Api-Key": key(), "X-Goog-FieldMask": fields },
+  });
+  const r = await res.json();
+  if (!res.ok || !r.id) {
+    console.error("details error", res.status, JSON.stringify(r).slice(0, 300));
+    return null;
+  }
+  const base = mapResult(r);
+  const refs = ((r.photos ?? []) as { name: string }[]).slice(0, 6).map((p) => p.name);
+  const photos = (await Promise.all(refs.map((n) => photoMediaUri(n, 1000)))).filter((u): u is string => !!u);
+  return {
+    ...base,
+    photos,
+    hours: r.regularOpeningHours?.weekdayDescriptions,
+    open_now: r.regularOpeningHours?.openNow,
+    summary: r.editorialSummary?.text,
+    website: r.websiteUri,
+    phone: r.internationalPhoneNumber,
+    user_rating_count: r.userRatingCount,
+    reviews: ((r.reviews ?? []) as any[]).slice(0, 3).map((v) => ({
+      author: v.authorAttribution?.displayName,
+      rating: v.rating,
+      text: String(v.text?.text ?? v.originalText?.text ?? "").slice(0, 400),
+      when: v.relativePublishTimeDescription,
+    })).filter((v) => v.text),
+  };
+}

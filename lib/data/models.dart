@@ -404,6 +404,8 @@ class PlaceSuggestion {
     this.address,
     this.rating,
     this.photoReference,
+    this.photoUrl,
+    this.types,
   });
 
   final String placeId;
@@ -414,6 +416,88 @@ class PlaceSuggestion {
   final String? address;
   final num? rating;
   final String? photoReference;
+  final String? photoUrl;
+  final List<String>? types;
+}
+
+class PlaceReview {
+  const PlaceReview({required this.text, this.author, this.rating, this.when});
+  final String text;
+  final String? author;
+  final num? rating;
+  final String? when;
+}
+
+/// Rich place info for the add-place sheet (photos resolved server-side).
+class PlaceFull {
+  const PlaceFull({
+    required this.placeId,
+    required this.name,
+    this.address,
+    this.lat,
+    this.lng,
+    this.rating,
+    this.ratingCount,
+    this.priceLevel,
+    this.types,
+    this.mapLink,
+    this.photos = const [],
+    this.photoReference,
+    this.hours,
+    this.openNow,
+    this.summary,
+    this.website,
+    this.phone,
+    this.reviews = const [],
+  });
+
+  final String placeId;
+  final String name;
+  final String? address;
+  final double? lat;
+  final double? lng;
+  final num? rating;
+  final int? ratingCount;
+  final int? priceLevel;
+  final List<String>? types;
+  final String? mapLink;
+  final List<String> photos;
+  final String? photoReference;
+  final List<String>? hours;
+  final bool? openNow;
+  final String? summary;
+  final String? website;
+  final String? phone;
+  final List<PlaceReview> reviews;
+
+  factory PlaceFull.fromMap(Map<String, dynamic> m) => PlaceFull(
+        placeId: m['place_id'] as String? ?? '',
+        name: m['name'] as String? ?? '',
+        address: m['address'] as String?,
+        lat: (m['lat'] as num?)?.toDouble(),
+        lng: (m['lng'] as num?)?.toDouble(),
+        rating: m['rating'] as num?,
+        ratingCount: (m['user_rating_count'] as num?)?.toInt(),
+        priceLevel: (m['price_level'] as num?)?.toInt(),
+        types: (m['types'] as List?)?.map((e) => '$e').toList(),
+        mapLink: m['map_link'] as String?,
+        photos: (m['photos'] as List?)?.map((e) => '$e').toList() ?? const [],
+        photoReference: m['photo_reference'] as String?,
+        hours: (m['hours'] as List?)?.map((e) => '$e').toList(),
+        openNow: m['open_now'] as bool?,
+        summary: m['summary'] as String?,
+        website: m['website'] as String?,
+        phone: m['phone'] as String?,
+        reviews: ((m['reviews'] as List?) ?? const [])
+            .map((r) => Map<String, dynamic>.from(r as Map))
+            .map((r) => PlaceReview(
+                  text: r['text'] as String? ?? '',
+                  author: r['author'] as String?,
+                  rating: r['rating'] as num?,
+                  when: r['when'] as String?,
+                ))
+            .toList(),
+      );
 }
 
 class WizardState {

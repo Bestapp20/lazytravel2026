@@ -9,6 +9,7 @@ import '../../core/utils/formatters.dart';
 import '../../core/widgets/lt_widgets.dart';
 import '../../data/models.dart';
 import '../../data/providers.dart';
+import 'widgets/itinerary_timeline.dart';
 
 class TripHubScreen extends ConsumerStatefulWidget {
   const TripHubScreen({super.key, required this.tripId});
@@ -111,7 +112,7 @@ class _TripHubScreenState extends ConsumerState<TripHubScreen> {
                         if (day == null || day.items.isEmpty)
                           Text('אין נקודות ביום זה עדיין.', style: GoogleFonts.notoSansHebrew(color: AppColors.textBody))
                         else
-                          ...day.items.map((it) => _itemCard(trip, it)),
+                          ItineraryTimeline(trip: trip, items: day.items, compact: true),
                       ] else if (_tab == 1) ...[
                         _logistics(trip, docsAsync.valueOrNull ?? []),
                       ] else ...[
@@ -126,7 +127,7 @@ class _TripHubScreenState extends ConsumerState<TripHubScreen> {
           floatingActionButton: trip.isOwner
               ? FloatingActionButton(
                   backgroundColor: AppColors.accent,
-                  onPressed: () => context.push('/trips/${trip.id}/item/edit?day=${day?.id ?? ''}'),
+                  onPressed: () => context.push('/trips/${trip.id}/item/add?day=${day?.id ?? ''}'),
                   child: const Icon(Icons.add, color: Colors.white),
                 )
               : null,
@@ -157,46 +158,7 @@ class _TripHubScreenState extends ConsumerState<TripHubScreen> {
     );
   }
 
-  Widget _itemCard(Trip trip, TripItem it) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: LtCard(
-        onTap: () => context.push('/trips/${trip.id}/place/${it.id}'),
-        padding: EdgeInsets.zero,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-              child: LtNetworkOrAsset(
-                asset: AppAssets.forDestination(trip.city),
-                url: it.photoUrl,
-                height: 140,
-                width: double.infinity,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(it.placeName, style: GoogleFonts.notoSansHebrew(fontWeight: FontWeight.w800, fontSize: 16)),
-                        Text(categoryLabel(it.category), style: GoogleFonts.notoSansHebrew(color: AppColors.textBody, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  Text(hhmm(it.startTime), style: GoogleFonts.notoSansHebrew(fontWeight: FontWeight.w700, color: AppColors.primaryDark)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   Widget _logistics(Trip trip, List<TripDocument> docs) {
     return Column(

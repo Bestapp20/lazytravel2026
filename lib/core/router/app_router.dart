@@ -16,6 +16,7 @@ import '../../features/profile/traveler_profile_screen.dart';
 import '../../features/sharing/share_trip_screen.dart';
 import '../../features/trips/budget_screen.dart';
 import '../../features/trips/daily_itinerary_screen.dart';
+import '../../features/trips/add_place_screen.dart';
 import '../../features/trips/edit_item_screen.dart';
 import '../../features/trips/map_view_screen.dart';
 import '../../features/trips/place_detail_screen.dart';
@@ -92,6 +93,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, s) => PlaceDetailScreen(
           tripId: s.pathParameters['id']!,
           itemId: s.pathParameters['itemId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/trips/:id/item/add',
+        builder: (_, s) => AddPlaceScreen(
+          tripId: s.pathParameters['id']!,
+          dayId: s.uri.queryParameters['day'],
         ),
       ),
       GoRoute(

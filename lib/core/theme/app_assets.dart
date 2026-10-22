@@ -24,6 +24,10 @@ class AppAssets {
   static const rome =
       'assets/images/rome_colosseum_aerial_golden_hour_ancient_rome_italy_tourism.jpg';
 
+  static const cardFlight = 'assets/images/card_flight.jpg';
+  static const cardBoat = 'assets/images/card_boat.jpg';
+  static const cardTransfer = 'assets/images/card_transfer.jpg';
+
   static String forDestination(String? city) {
     final c = (city ?? '').toLowerCase();
     if (c.contains('barc')) return barcelonaHero;

@@ -1,5 +1,5 @@
 import { json, optionsResponse } from "../_shared/cors.ts";
-import { placeDetails, textSearch } from "../_shared/places.ts";
+import { photoMediaUri, placeDetails, placeDetailsFull, textSearch } from "../_shared/places.ts";
 import { userClient } from "../_shared/supabase.ts";
 
 Deno.serve(async (req) => {
@@ -8,6 +8,9 @@ Deno.serve(async (req) => {
     await userClient(req);
     const body = await req.json();
     if (body.place_id) {
+      if (body.full) {
+        return json({ result: await placeDetailsFull(String(body.place_id), String(body.lang ?? "he")) });
+      }
       const details = await placeDetails(String(body.place_id));
       return json({ result: details });
     }
@@ -16,7 +19,15 @@ Deno.serve(async (req) => {
     const location = body.lat != null && body.lng != null
       ? { lat: Number(body.lat), lng: Number(body.lng) }
       : undefined;
-    const results = await textSearch(query, location);
+    let results = await textSearch(query, location);
+    const limit = Number(body.limit ?? 0);
+    if (limit > 0) results = results.slice(0, limit);
+    if (body.with_photos) {
+      results = await Promise.all(results.map(async (r) => ({
+        ...r,
+        photo_url: r.photo_reference ? await photoMediaUri(r.photo_reference, 600) : null,
+      })));
+    }
     return json({ results });
   } catch (err) {
     if (err instanceof Response) return err;
