@@ -59,7 +59,7 @@ async function liteSearch(name: string, city: string, currency: string): Promise
 }
 
 export function tpLink(program: number | string, url: string) {
-  const trs = Deno.env.get("TP_TRS");
+  const trs = Deno.env.get("TP_TRS") || "544254"; // Travelpayouts project id (not secret)
   const u = new URL("https://tp.media/r");
   u.searchParams.set("marker", MARKER()); if (trs) u.searchParams.set("trs", trs);
   u.searchParams.set("p", String(program)); u.searchParams.set("u", url);
@@ -92,3 +92,4 @@ export async function matchPlace(p: { name: string; city?: string; lat?: number;
 
 export const placeKey = (name: string, lat?: number, lng?: number) =>
   `${norm(name).trim().replace(/\s+/g, " ")}|${lat?.toFixed(3) ?? ""}|${lng?.toFixed(3) ?? ""}`;
+
