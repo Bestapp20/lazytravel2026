@@ -56,7 +56,7 @@ class _TripHubScreenState extends ConsumerState<TripHubScreen> {
                   background: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.asset(AppAssets.forDestination(trip.city), fit: BoxFit.cover),
+                      LtNetworkOrAsset(asset: AppAssets.forDestination(trip.city), url: trip.coverImageUrl),
                       Container(color: Colors.black.withValues(alpha: 0.25)),
                     ],
                   ),

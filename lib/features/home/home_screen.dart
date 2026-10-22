@@ -230,7 +230,7 @@ class HomeScreen extends ConsumerWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Image.asset(AppAssets.forDestination(trip.city), fit: BoxFit.cover),
+                LtNetworkOrAsset(asset: AppAssets.forDestination(trip.city), url: trip.coverImageUrl),
                 Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -368,11 +368,11 @@ class HomeScreen extends ConsumerWidget {
           children: [
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-              child: Image.asset(
-                AppAssets.forDestination(trip.city),
+              child: LtNetworkOrAsset(
+                asset: AppAssets.forDestination(trip.city),
+                url: trip.coverImageUrl,
                 width: 162,
                 height: 98,
-                fit: BoxFit.cover,
               ),
             ),
             Padding(
