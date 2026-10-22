@@ -146,8 +146,8 @@ export async function flightLive(p: {
 
 export async function flightPrebook(body: unknown): Promise<any> {
   const d = await call(`${API}/flights/prebooks`, body);
-  const r = d.data?.[0] ?? d.data ?? d;
-  return r.booking ?? r;
+  // Keep the top level (prebookId, transactionId, secretKey, price); `booking` holds the journey detail.
+  return d.data?.[0] ?? d.data ?? d;
 }
 
 /** Attach the cheapest 'CHECKED BAG' service per segment per passenger. Returns the updated prebook. */

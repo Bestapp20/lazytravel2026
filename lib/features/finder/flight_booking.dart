@@ -558,11 +558,13 @@ class _FlightCheckoutScreenState extends ConsumerState<FlightCheckoutScreen> {
       final r = Map<String, dynamic>.from(b.data as Map);
       if (r['error'] != null) throw Exception(r['error']);
       if (!mounted) return;
-      final addTrip = await Navigator.of(context).pushReplacement(_fade(FlightConfirmationScreen(
+      // push (not pushReplacement) so the confirmation's result reaches the offer screen.
+      final addTrip = await Navigator.of(context).push<bool>(_fade(FlightConfirmationScreen(
         offer: widget.offer, live: _live, result: r, quote: q,
         names: [for (final p in _pax) '${p.first.text.trim()} ${p.last.text.trim()}'.toUpperCase()],
       )));
-      if (addTrip == true && mounted) Navigator.of(context).pop(true);
+      // Booking is done either way: never drop the user back into checkout.
+      if (mounted) Navigator.of(context).pop(addTrip == true);
     } catch (e) {
       if (mounted) {
         setState(() => _phase = null);

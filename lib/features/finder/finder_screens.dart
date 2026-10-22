@@ -505,7 +505,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     _email.text = client.auth.currentUser?.email ?? '';
     client.from('trip_offers').select().eq('id', widget.offerId).single().then((o) async {
       if (mounted) setState(() => _offer = o);
-      final s = await client.from('trip_searches').select('adults,children').eq('id', o['search_id']).maybeSingle();
+      final s = await client.from('trip_searches').select('adults,children,components').eq('id', o['search_id']).maybeSingle();
       if (mounted) setState(() => _search = s);
     });
   }
@@ -551,7 +551,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     }
   }
 
-  bool get _withItinerary => ((_search?['components'] as List?) ?? const ['itinerary']).contains('itinerary');
+  bool get _withItinerary => ((_search?['components'] as List?) ?? const []).contains('itinerary');
 
   Future<void> _createTrip() async {
     if (_creating || _busy) return;

@@ -23,6 +23,11 @@ Deno.serve(async (req) => {
       offerId: live.offer_id, usePaymentSdk: true, contact: b.contact,
       passengers: passengers.map((p) => ({ ...p, passengerType: p.passengerType ?? 0 })),
     });
+    if (!pre?.prebookId) {
+      const why = pre?.error?.message ?? pre?.message ?? pre?.errors?.[0]?.message ?? JSON.stringify(pre).slice(0, 300);
+      console.error("flight prebook failed", JSON.stringify(pre).slice(0, 1500));
+      return json({ error: `prebook failed: ${why}` }, 502);
+    }
     let bagsAttached = false;
     if (mode === "checked" && !live.checked_included) {
       pre = { ...pre, ...(await flightAttachCheckedBags(pre, passengers.length)) };
