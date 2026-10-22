@@ -18,6 +18,7 @@ Deno.serve(async (req) => {
       nights_min: Number(b.nights_min ?? 4), nights_max: Number(b.nights_max ?? b.nights_min ?? 4),
       adults: Number(b.adults ?? 2), children: Number(b.children ?? 0),
       budget: b.budget ?? null, currency: b.currency ?? "ILS",
+      bag_mode: ["checked", "carryon"].includes(b.bag_mode) ? b.bag_mode : "none",
     };
     const { data, error } = await client.from("trip_searches").insert(row).select("id").single();
     if (error) return json({ error: error.message }, 400);

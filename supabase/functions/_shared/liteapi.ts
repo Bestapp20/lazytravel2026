@@ -79,3 +79,89 @@ export async function book(p: {
   });
   return d.data ?? d;
 }
+
+
+// ───────────── Flights (LiteAPI / Nuitee) ─────────────
+export type BagMode = "none" | "checked" | "carryon";
+export type LiveFlight = {
+  offer_id: string; total: number; fare_total: number; bag_total: number; currency: string;
+  fare_family?: string; airline?: string; carry_on: boolean; checked_included: boolean;
+  checked_kg?: number; bag_note: string; segments: { from: string; to: string; dep: string; flight?: string; dir?: string }[];
+};
+
+/** Live round-trip search; returns the cheapest offer satisfying the bag mode (bags priced per passenger, estimate). */
+export async function flightLive(p: {
+  origin: string; destination: string; depart: string; ret: string; adults: number; children: number; currency: string; mode: BagMode;
+}): Promise<LiveFlight | null> {
+  const d = await call(`${API}/flights/rates`, {
+    legs: [{ origin: p.origin, destination: p.destination, date: p.depart }, { origin: p.destination, destination: p.origin, date: p.ret }],
+    adults: p.adults, children: p.children, childrenAges: p.children ? Array(p.children).fill(10) : undefined, currency: p.currency,
+  });
+  const pax = p.adults + p.children;
+  let best: LiveFlight | null = null;
+  for (const j of d.data?.[0]?.journeys ?? []) {
+    for (const o of j.offers ?? [j.cheapestOffer]) {
+      if (!o) continue;
+      const b = o.baggage ?? {};
+      const fare = Number(o.pricing?.display?.total);
+      if (!fare) continue;
+      let bag = 0, note = "";
+      const paidChecked = (b.paid ?? []).filter((x: any) => x.bagType === "checked")
+        .sort((a: any, z: any) => a.pricing.display.amount - z.pricing.display.amount)[0];
+      const paidCabin = (b.paid ?? []).filter((x: any) => x.bagType === "cabin")[0];
+      const inclChecked = (b.included ?? []).find((x: any) => x.bagType === "checked");
+      if (p.mode === "checked") {
+        if (b.hasCheckedBag) note = `מזוודה ${inclChecked?.weightKg ?? ""} ק״ג כלולה`.replace("  ", " ");
+        else if (paidChecked) { bag = paidChecked.pricing.display.amount * pax; note = `+ מזוודה ${paidChecked.weightKg ?? ""} ק״ג (משוער)`; }
+        else continue;
+      } else if (p.mode === "carryon") {
+        if (b.hasCarryOnBag) note = "תיק עלייה למטוס כלול";
+        else if (paidCabin) { bag = paidCabin.pricing.display.amount * pax; note = "+ תיק עלייה למטוס (משוער)"; }
+        else continue;
+      }
+      const total = Math.round((fare + bag) * 100) / 100;
+      if (best && best.total <= total) continue;
+      const segs = (j.segments ?? []).map((s: any) => ({
+        from: s.originCode, to: s.destinationCode, dep: s.departureTime, dir: s.direction,
+        flight: `${s.carrier?.marketingCode ?? ""}${s.flight?.marketingNumber ?? ""}`,
+      }));
+      best = {
+        offer_id: o.offerId, total, fare_total: fare, bag_total: bag, currency: o.pricing.display.currency,
+        fare_family: o.fare?.family, airline: j.segments?.[0]?.carrier?.marketingName,
+        carry_on: !!b.hasCarryOnBag, checked_included: !!b.hasCheckedBag, checked_kg: inclChecked?.weightKg ?? paidChecked?.weightKg,
+        bag_note: note, segments: segs,
+      };
+    }
+  }
+  return best;
+}
+
+export async function flightPrebook(body: unknown): Promise<any> {
+  const d = await call(`${API}/flights/prebooks`, body);
+  const r = d.data?.[0] ?? d.data ?? d;
+  return r.booking ?? r;
+}
+
+/** Attach the cheapest 'CHECKED BAG' service per segment per passenger. Returns the updated prebook. */
+export async function flightAttachCheckedBags(prebook: any, pax: number): Promise<any> {
+  const svcs = (prebook.servicesAttachable?.groups ?? []).filter((g: any) => g.category === "baggage").flatMap((g: any) => g.services ?? []);
+  const bySeg = new Map<string, any>();
+  for (const s of svcs) {
+    if (!/CHECKED BAG/i.test(s.name ?? "") && s.metadata?.baggage?.bagType !== "checked") continue;
+    if (/BICYCLE|SPORT|EXCESS/i.test(s.name ?? "")) continue;
+    const cur = bySeg.get(s.segmentKey);
+    if (!cur || s.pricing.display.amount < cur.pricing.display.amount) bySeg.set(s.segmentKey, s);
+  }
+  if (!bySeg.size) throw new Error("no checked-bag service available to attach");
+  const selectedServices = [];
+  for (let i = 0; i < pax; i++) for (const s of bySeg.values()) selectedServices.push({ passengerIndex: i, serviceId: s.serviceId, quantity: 1 });
+  const d = await call(`${API}/flights/prebooks/${prebook.prebookId}/services`, { selectedServices });
+  const r = d.data?.[0] ?? d.data ?? d;
+  return r.booking ?? r;
+}
+
+export async function flightBook(prebookId: string, transactionId: string): Promise<any> {
+  const d = await call(`${API}/flights/bookings`, { prebookId, payment: { method: "TRANSACTION_ID", transactionId } });
+  const r = d.data?.[0] ?? d.data ?? d;
+  return r.booking ?? r;
+}

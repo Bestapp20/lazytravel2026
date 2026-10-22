@@ -78,6 +78,16 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
   final _budget = TextEditingController();
   bool _anywhere = false;
   DateTimeRange? _range;
+  String _dateMode = '3m'; // 1m | 3m | any | exact
+  String _bagMode = 'none'; // none | checked | carryon
+
+  /// Effective date window: chips give rolling windows from tomorrow; 'exact' uses the picker.
+  DateTimeRange? get _window {
+    if (_dateMode == 'exact') return _range;
+    final start = DateUtils.dateOnly(DateTime.now()).add(const Duration(days: 1));
+    final days = switch (_dateMode) { '1m' => 30, 'any' => 180, _ => 90 };
+    return DateTimeRange(start: start, end: start.add(Duration(days: days)));
+  }
   RangeValues _nights = const RangeValues(4, 7);
   int _adults = 2;
   int _children = 0;
@@ -101,24 +111,24 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
       initialDateRange: _range,
       helpText: 'חלון תאריכים גמיש',
     );
-    if (r != null) setState(() => _range = r);
+    if (r != null) setState(() { _range = r; _dateMode = 'exact'; });
   }
 
   Future<void> _submit() async {
     final client = ref.read(supabaseProvider);
-    if (client == null || _range == null) return;
-    if (!_anywhere && _dest.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('בחר יעד או "לכל מקום"')));
-      return;
-    }
+    final win = _window;
+    if (client == null || win == null) return;
+    // No destination typed = anywhere (a budget-only search must work).
+    final anywhere = _anywhere || _dest.text.trim().isEmpty;
     setState(() => _busy = true);
     try {
       final f = DateFormat('yyyy-MM-dd');
       final res = await client.functions.invoke('trip-search-start', body: {
         'origin': _origin.text.trim().isEmpty ? 'TLV' : _origin.text.trim(),
-        'destination': _anywhere ? null : _dest.text.trim(),
-        'date_from': f.format(_range!.start),
-        'date_to': f.format(_range!.end),
+        'destination': anywhere ? null : _dest.text.trim(),
+        'date_from': f.format(win.start),
+        'date_to': f.format(win.end),
+        'bag_mode': _bagMode,
         'nights_min': _nights.start.round(),
         'nights_max': _nights.end.round(),
         'adults': _adults,
@@ -178,20 +188,34 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
                 ]),
                 if (!_anywhere) ...[
                   const SizedBox(height: 10),
-                  TextField(controller: _dest, decoration: _dec('למשל: Koh Samui, Rome', Icons.place_outlined)),
+                  TextField(controller: _dest, decoration: _dec('למשל: Koh Samui, Rome (ריק = לכל מקום)', Icons.place_outlined)),
                 ],
                 _label('יוצאים מ'),
                 TextField(controller: _origin, decoration: _dec('קוד שדה/עיר, למשל TLV', Icons.flight_takeoff)),
                 _label('חלון תאריכים'),
-                LtCard(
-                  onTap: _pickDates,
-                  child: Row(children: [
-                    const Icon(Icons.date_range, color: AppColors.accent),
-                    const SizedBox(width: 10),
-                    Text(_range == null ? 'בחר טווח' : '${_d.format(_range!.start)} – ${_d.format(_range!.end)}', style: _t(15)),
-                  ]),
-                ),
-                _label('אורך הטיול: ${_nights.start.round()}–${_nights.end.round()} לילות'),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  LtChip(label: 'החודש הקרוב', selected: _dateMode == '1m', onTap: () => setState(() => _dateMode = '1m')),
+                  LtChip(label: '3 החודשים הקרובים', selected: _dateMode == '3m', onTap: () => setState(() => _dateMode = '3m')),
+                  LtChip(label: 'לא משנה לי', selected: _dateMode == 'any', onTap: () => setState(() => _dateMode = 'any')),
+                  LtChip(label: '📅 תאריכים מדויקים', selected: _dateMode == 'exact', onTap: _pickDates),
+                ]),
+                if (_window != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text('${_d.format(_window!.start)} – ${_d.format(_window!.end)}', style: _t(12, c: AppColors.textBody)),
+                  ),
+                _label('כבודה'),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  LtChip(label: 'לא חשוב', selected: _bagMode == 'none', onTap: () => setState(() => _bagMode = 'none')),
+                  LtChip(label: '🧳 כולל מזוודה', selected: _bagMode == 'checked', onTap: () => setState(() => _bagMode = 'checked')),
+                  LtChip(label: '🎒 תיק עלייה בלבד', selected: _bagMode == 'carryon', onTap: () => setState(() => _bagMode = 'carryon')),
+                ]),
+                if (_bagMode != 'none')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text('נבדוק מחיר חי כולל כבודה לתאריכים הזולים (לוקח עוד כמה שניות)', style: _t(12, c: AppColors.textBody)),
+                  ),
+                _label('אורך הטיול (לא חובה): ${_nights.start.round()}–${_nights.end.round()} לילות'),
                 RangeSlider(
                   values: _nights,
                   min: 2,
@@ -214,7 +238,7 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
                 LtPrimaryButton(
                   label: _busy ? 'מחפש...' : 'חפש לי טיול',
                   icon: Icons.search,
-                  onPressed: _busy || _range == null ? null : _submit,
+                  onPressed: _busy || _window == null ? null : _submit,
                 ),
               ],
             ),
@@ -519,6 +543,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     final cur = o['currency'] as String? ?? 'ILS';
     final flight = o['flight'] as Map?;
     final link = flight?['link'] as String?;
+    final live = flight?['live'] as Map?;
     return Scaffold(
       backgroundColor: AppColors.bgLight,
       body: CustomScrollView(slivers: [
@@ -529,7 +554,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
             if (o['hotel_photo'] != null)
               ClipRRect(borderRadius: BorderRadius.circular(18), child: Image.network(o['hotel_photo'], height: 190, fit: BoxFit.cover)),
             const SizedBox(height: 14),
-            if (o['flight_price'] != null)
+            if (o['flight_price'] != null || flight?['origin'] != null)
               LtCard(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
@@ -541,12 +566,25 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
                   ]),
                   const SizedBox(height: 6),
                   if (flight?['depart'] != null)
-                    Text('${flight!['origin']} → ${flight['destination']} · ${flight['depart']} / ${flight['ret']} · ${flight['airline'] ?? ''}', style: _t(13, c: AppColors.textBody)),
-                  Text('מחיר משוער ממטמון חיפושים, יאומת באתר ההזמנה', style: _t(11, c: AppColors.textBody)),
+                    Text('${flight!['origin']} → ${flight['destination']} · ${flight['depart']} / ${flight['ret']} · ${live?['airline'] ?? flight['airline'] ?? ''}', style: _t(13, c: AppColors.textBody)),
+                  if (live != null) ...[
+                    if ((live['bag_note'] ?? '') != '') Text('🧳 ${live['bag_note']}', style: _t(13, w: FontWeight.w700, c: AppColors.primaryDark)),
+                    Text('${live['fare_family'] ?? ''} · כרטיס ${_price(live['fare_total'], cur)}${(live['bag_total'] ?? 0) > 0 ? ' + כבודה ${_price(live['bag_total'], cur)}' : ''}', style: _t(12, c: AppColors.textBody)),
+                    Text('מחיר חי (LiteAPI), יאומת שוב בתשלום', style: _t(11, c: AppColors.textBody)),
+                    const SizedBox(height: 10),
+                    LtPrimaryButton(
+                      label: 'הזמן טיסה באפליקציה',
+                      icon: Icons.flight_takeoff,
+                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => FlightCheckoutScreen(offer: o, adults: (_search?['adults'] as num?)?.toInt() ?? 1, children: (_search?['children'] as num?)?.toInt() ?? 0),
+                      )),
+                    ),
+                  ] else
+                    Text(o['flight_price'] == null ? 'אין מחיר שמור לטיסה, בדוק באתר' : 'מחיר משוער ממטמון חיפושים, יאומת באתר ההזמנה', style: _t(11, c: AppColors.textBody)),
                   if (link != null) ...[
                     const SizedBox(height: 10),
                     LtSecondaryButton(
-                      label: 'הזמן טיסה',
+                      label: live != null ? 'השווה ב-Aviasales' : 'הזמן טיסה',
                       icon: Icons.open_in_new,
                       onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) => FlightWebViewScreen(url: link),
@@ -735,6 +773,184 @@ class _FlightWebViewScreenState extends State<FlightWebViewScreen> {
               ),
             )
           : WebViewWidget(controller: _c),
+    );
+  }
+}
+
+
+/// In-app flight checkout via LiteAPI/Nuitee (Nuitee is merchant of record). Passenger details → prebook (+bags) → payment SDK → book.
+class FlightCheckoutScreen extends ConsumerStatefulWidget {
+  const FlightCheckoutScreen({super.key, required this.offer, required this.adults, required this.children});
+  final Map<String, dynamic> offer;
+  final int adults;
+  final int children;
+  @override
+  ConsumerState<FlightCheckoutScreen> createState() => _FlightCheckoutScreenState();
+}
+
+class _Pax {
+  final first = TextEditingController();
+  final last = TextEditingController();
+  final birthday = TextEditingController();
+  final passport = TextEditingController();
+  final expiry = TextEditingController();
+  String gender = 'M';
+}
+
+class _FlightCheckoutScreenState extends ConsumerState<FlightCheckoutScreen> {
+  late final List<_Pax> _pax = List.generate(widget.adults + widget.children, (_) => _Pax());
+  final _email = TextEditingController();
+  final _phone = TextEditingController();
+  late bool _bags = (widget.offer['flight']?['live']?['checked_included'] != true) &&
+      widget.offer['flight']?['bag_mode'] == 'checked';
+  bool _busy = false;
+  String? _result;
+  Map<String, dynamic>? _quote;
+
+  @override
+  void initState() {
+    super.initState();
+    _email.text = ref.read(supabaseProvider)?.auth.currentUser?.email ?? '';
+  }
+
+  bool _validDate(String s) => RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(s.trim());
+
+  Future<void> _pay() async {
+    if (_busy) return;
+    for (final p in _pax) {
+      if (p.first.text.trim().isEmpty || p.last.text.trim().isEmpty || !_validDate(p.birthday.text)) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('מלא שם (באנגלית) ותאריך לידה YYYY-MM-DD לכל נוסע')));
+        return;
+      }
+    }
+    if (!_email.text.contains('@') || _phone.text.trim().length < 7) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('מלא מייל וטלפון')));
+      return;
+    }
+    final client = ref.read(supabaseProvider)!;
+    setState(() => _busy = true);
+    try {
+      final phone = _phone.text.trim().replaceAll(RegExp(r'[^0-9]'), '').replaceFirst(RegExp(r'^(972|0)'), '');
+      final res = await client.functions.invoke('flight-prebook', body: {
+        'offer_id': widget.offer['id'],
+        'with_bags': _bags,
+        'contact': {
+          'firstName': _pax.first.first.text.trim(), 'lastName': _pax.first.last.text.trim(),
+          'email': _email.text.trim(), 'phoneCountryCode': '972', 'phoneNumber': phone,
+        },
+        'passengers': [
+          for (var i = 0; i < _pax.length; i++)
+            {
+              'passengerType': i < widget.adults ? 0 : 1,
+              'firstName': _pax[i].first.text.trim(),
+              'lastName': _pax[i].last.text.trim(),
+              'birthday': _pax[i].birthday.text.trim(),
+              'gender': _pax[i].gender,
+              'nationality': 'IL',
+              if (_pax[i].passport.text.trim().isNotEmpty) ...{
+                'documentType': 'passport',
+                'documentNumber': _pax[i].passport.text.trim(),
+                'documentIssueCountry': 'IL',
+                if (_validDate(_pax[i].expiry.text)) 'documentExpiry': _pax[i].expiry.text.trim(),
+              },
+            },
+        ],
+      });
+      final q = Map<String, dynamic>.from(res.data as Map);
+      if (q['error'] != null) throw Exception(q['error']);
+      setState(() => _quote = q);
+      if (!mounted) return;
+      final paid = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => PaymentWebViewScreen(secretKey: q['secret_key'], sandbox: q['sandbox'] == true),
+      ));
+      if (paid != true) return;
+      final b = await client.functions.invoke('flight-book', body: {'booking_id': q['booking_id']});
+      final r = Map<String, dynamic>.from(b.data as Map);
+      if (r['error'] != null) throw Exception(r['error']);
+      final st = '${r['status']}'.toUpperCase();
+      setState(() => _result = '${st == 'CONFIRMED' ? 'מאושר' : st.startsWith('PENDING') ? 'ממתין לאישור חברת התעופה' : st} · ${r['booking_ref'] ?? r['booking_id']}${r['pnr'] != null ? ' · PNR ${r['pnr']}' : ''}');
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('שגיאה: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _tf(TextEditingController c, String hint, {TextInputType? kb}) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: TextField(
+          controller: c,
+          keyboardType: kb,
+          decoration: InputDecoration(hintText: hint, isDense: true, filled: true, fillColor: Colors.white,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final f = widget.offer['flight'] as Map;
+    final live = f['live'] as Map? ?? {};
+    final cur = widget.offer['currency'] as String? ?? 'ILS';
+    return Scaffold(
+      backgroundColor: AppColors.bgLight,
+      body: ListView(padding: EdgeInsets.zero, children: [
+        _Header(title: 'הזמנת טיסה', subtitle: '${f['origin']} ⇄ ${f['destination']} · ${f['depart']} / ${f['ret']}'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            LtCard(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${live['airline'] ?? ''} · ${live['fare_family'] ?? ''}', style: _t(15, w: FontWeight.w800)),
+                for (final s in (live['segments'] as List? ?? []))
+                  Text('${s['flight']}  ${s['from']} → ${s['to']}  ${(s['dep'] ?? '').toString().replaceFirst('T', ' ').substring(0, 16)}', style: _t(12, c: AppColors.textBody)),
+                const SizedBox(height: 6),
+                Text(live['checked_included'] == true ? '🧳 מזוודה כלולה במחיר' : '🎒 ${live['carry_on'] == true ? 'תיק עלייה כלול' : 'ללא כבודה כלולה'}', style: _t(13)),
+                if (live['checked_included'] != true)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _bags,
+                    activeColor: AppColors.accent,
+                    onChanged: _busy ? null : (v) => setState(() => _bags = v),
+                    title: Text('הוסף מזוודה לכל נוסע (הלוך וחזור)', style: _t(14)),
+                    subtitle: Text('המחיר הסופי יחושב מול חברת התעופה', style: _t(11, c: AppColors.textBody)),
+                  ),
+                Text('מחיר משוער: ${_price(live['fare_total'], cur)}', style: _t(13, c: AppColors.textBody)),
+                if (_quote != null)
+                  Text('לתשלום: ${_price(_quote!['price'], _quote!['currency'] ?? cur)}${(_quote!['baggage_amount'] ?? 0) > 0 ? ' (כולל כבודה ${_price(_quote!['baggage_amount'], _quote!['currency'] ?? cur)})' : ''}',
+                      style: _t(15, w: FontWeight.w800, c: AppColors.primaryDark)),
+              ]),
+            ),
+            const SizedBox(height: 16),
+            for (var i = 0; i < _pax.length; i++) ...[
+              Text('נוסע ${i + 1} ${i < widget.adults ? '(מבוגר)' : '(ילד)'} – כמו בדרכון, באנגלית', style: _t(14, w: FontWeight.w700)),
+              const SizedBox(height: 8),
+              _tf(_pax[i].first, 'First name'),
+              _tf(_pax[i].last, 'Last name'),
+              _tf(_pax[i].birthday, 'Birthday YYYY-MM-DD', kb: TextInputType.datetime),
+              Row(children: [
+                LtChip(label: 'M', selected: _pax[i].gender == 'M', onTap: () => setState(() => _pax[i].gender = 'M')),
+                const SizedBox(width: 8),
+                LtChip(label: 'F', selected: _pax[i].gender == 'F', onTap: () => setState(() => _pax[i].gender = 'F')),
+              ]),
+              const SizedBox(height: 8),
+              _tf(_pax[i].passport, 'Passport number (optional)'),
+              _tf(_pax[i].expiry, 'Passport expiry YYYY-MM-DD (optional)', kb: TextInputType.datetime),
+              const SizedBox(height: 10),
+            ],
+            Text('פרטי קשר', style: _t(14, w: FontWeight.w700)),
+            const SizedBox(height: 8),
+            _tf(_email, 'Email', kb: TextInputType.emailAddress),
+            _tf(_phone, 'טלפון נייד, למשל 0501234567', kb: TextInputType.phone),
+            const SizedBox(height: 12),
+            if (_result != null)
+              LtCard(child: Text('✅ הטיסה הוזמנה: $_result', style: _t(14, w: FontWeight.w700, c: AppColors.success)))
+            else
+              LtPrimaryButton(label: _busy ? 'מעבד...' : 'המשך לתשלום', icon: Icons.lock_outline, onPressed: _busy ? null : _pay),
+            const SizedBox(height: 8),
+            Text('התשלום מתבצע מול Nuitee (LiteAPI), שגובה את הכסף ומנפיק את הכרטיס.', style: _t(11, c: AppColors.textBody)),
+          ]),
+        ),
+      ]),
     );
   }
 }

@@ -6,6 +6,11 @@ function token(): string {
   if (!t) throw new Error("TRAVELPAYOUTS_TOKEN is not set");
   return t;
 }
+/** Clean Aviasales results link with the right passenger count (documented: {O}{ddmm}{D}{ddmm}{adults}{children}{infants}). */
+export function aviasalesLink(o: string, d: string, depart: string, ret: string, adults: number, children: number): string {
+  const dm = (s: string) => s.slice(8, 10) + s.slice(5, 7);
+  return `https://www.aviasales.com/search/${o}${dm(depart)}${d}${dm(ret)}${Math.min(9, adults)}${children ? Math.min(9, children) : ""}?marker=${marker()}`;
+}
 export const marker = () => Deno.env.get("TRAVELPAYOUTS_MARKER") ?? "";
 
 async function get(path: string, q: Record<string, string | number | boolean>): Promise<any> {
