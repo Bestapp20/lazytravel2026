@@ -45,6 +45,10 @@ String categoryLabel(String? category) {
       return 'קניות';
     case 'nightlife':
       return 'חיי לילה';
+    case 'flight':
+      return 'טיסה';
+    case 'transport':
+      return 'העברה';
     case 'attraction':
     default:
       return 'אטרקציה';
@@ -65,6 +69,10 @@ String categoryEmoji(String? category) {
       return '🛍️';
     case 'nightlife':
       return '🎉';
+    case 'flight':
+      return '✈️';
+    case 'transport':
+      return '🚕';
     default:
       return '📍';
   }
