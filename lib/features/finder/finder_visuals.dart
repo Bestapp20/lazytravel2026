@@ -91,7 +91,7 @@ class _OfferCard extends StatelessWidget {
             Text('${_d.format(DateTime.parse(offer['checkin']))} – ${_d.format(DateTime.parse(offer['checkout']))} · ${offer['nights']} לילות',
                 style: _t(13, w: FontWeight.w700, c: AppColors.primaryDark)),
             const SizedBox(height: 4),
-            Row(children: [
+            if (offer['hotel_name'] != null) Row(children: [
               const Icon(Icons.hotel, size: 15, color: AppColors.textBody),
               const SizedBox(width: 4),
               Expanded(child: Text(offer['hotel_name'] ?? '', style: _t(12.5, c: AppColors.textBody), maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -112,7 +112,7 @@ class _OfferCard extends StatelessWidget {
               const Spacer(),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                 Text(_price(offer['total'], cur), style: _t(20, w: FontWeight.w900, c: AppColors.primaryDark)),
-                Text('סה״כ טיסה + מלון', style: _t(10.5, c: AppColors.textBody)),
+                Text(offer['hotel_name'] == null ? 'סה״כ טיסה' : offer['flight_price'] == null ? 'סה״כ מלון' : 'סה״כ טיסה + מלון', style: _t(10.5, c: AppColors.textBody)),
               ]),
             ]),
           ]),
