@@ -412,6 +412,8 @@ class FinderOfferScreen extends ConsumerStatefulWidget {
 
 class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
   Map<String, dynamic>? _offer;
+  Map<String, dynamic>? _search;
+  bool _creating = false;
   final _first = TextEditingController();
   final _last = TextEditingController();
   final _email = TextEditingController();
@@ -423,8 +425,10 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     super.initState();
     final client = ref.read(supabaseProvider)!;
     _email.text = client.auth.currentUser?.email ?? '';
-    client.from('trip_offers').select().eq('id', widget.offerId).single().then((o) {
+    client.from('trip_offers').select().eq('id', widget.offerId).single().then((o) async {
       if (mounted) setState(() => _offer = o);
+      final s = await client.from('trip_searches').select('adults,children').eq('id', o['search_id']).maybeSingle();
+      if (mounted) setState(() => _search = s);
     });
   }
 
@@ -469,16 +473,18 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
   }
 
   Future<void> _createTrip() async {
+    if (_creating || _busy) return;
     final o = _offer!;
     final repo = ref.read(tripsRepositoryProvider);
     if (repo == null) return;
-    setState(() => _busy = true);
+    setState(() => _creating = true);
     try {
       final id = await repo.generateRoute({
         'destination': {'city': o['destination'], 'lat': o['dest_lat'], 'lng': o['dest_lng']},
         'start_date': o['checkin'],
         'end_date': o['checkout'],
-        'adults': 2,
+        'adults': (_search?['adults'] as num?)?.toInt() ?? 2,
+        'kids': (_search?['children'] as num?)?.toInt() ?? 0,
         'budget_total': o['total'],
         'currency': o['currency'] ?? 'ILS',
         'hotel': {'name': o['hotel_name'], 'address': o['hotel_address']},
@@ -489,7 +495,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('שגיאה: $e')));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _creating = false);
     }
   }
 
@@ -542,7 +548,9 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
                     LtSecondaryButton(
                       label: 'הזמן טיסה',
                       icon: Icons.open_in_new,
-                      onPressed: () => launchUrl(Uri.parse(link), mode: LaunchMode.inAppBrowserView),
+                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => FlightWebViewScreen(url: link),
+                      )),
                     ),
                   ],
                 ]),
@@ -574,7 +582,16 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
               ]),
             ),
             const SizedBox(height: 20),
-            LtSecondaryButton(label: 'צור טיול מההצעה', icon: Icons.auto_awesome, onPressed: _busy ? null : _createTrip),
+            LtSecondaryButton(
+              label: _creating ? 'יוצר טיול... (עד דקה)' : 'צור טיול מההצעה',
+              icon: _creating ? Icons.hourglass_top : Icons.auto_awesome,
+              onPressed: _creating || _busy ? null : _createTrip,
+            ),
+            if (_creating)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: LinearProgressIndicator(color: AppColors.accent, backgroundColor: AppColors.sectionTint),
+              ),
             const SizedBox(height: 16),
             if (_confirmation != null)
               LtCard(child: Text('✅ ההזמנה אושרה: $_confirmation', style: _t(14, w: FontWeight.w700, c: AppColors.success)))
@@ -639,6 +656,85 @@ new LiteAPIPayment({publicKey:'${widget.sandbox ? 'sandbox' : 'live'}',appearanc
     return Scaffold(
       appBar: AppBar(title: Text('תשלום מאובטח', style: _t(17, w: FontWeight.w700))),
       body: WebViewWidget(controller: _c),
+    );
+  }
+}
+
+
+/// Aviasales booking page inside the app. Uses a full WebView (JS + DOM storage, mobile Chrome UA)
+/// instead of a Custom Tab, which rendered blank on first launch. Falls back to the external browser.
+class FlightWebViewScreen extends StatefulWidget {
+  const FlightWebViewScreen({super.key, required this.url});
+  final String url;
+  @override
+  State<FlightWebViewScreen> createState() => _FlightWebViewScreenState();
+}
+
+class _FlightWebViewScreenState extends State<FlightWebViewScreen> {
+  late final WebViewController _c;
+  int _progress = 0;
+  String? _error;
+
+  static const _ua =
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
+
+  @override
+  void initState() {
+    super.initState();
+    _c = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent(_ua)
+      ..setNavigationDelegate(NavigationDelegate(
+        onProgress: (p) => mounted ? setState(() => _progress = p) : null,
+        onWebResourceError: (e) {
+          if (e.isForMainFrame ?? true) setState(() => _error = e.description);
+        },
+        onNavigationRequest: (req) {
+          final u = Uri.tryParse(req.url);
+          if (u != null && u.scheme != 'http' && u.scheme != 'https') {
+            launchUrl(u, mode: LaunchMode.externalApplication);
+            return NavigationDecision.prevent;
+          }
+          return NavigationDecision.navigate;
+        },
+      ))
+      ..loadRequest(Uri.parse(widget.url));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('הזמנת טיסה', style: _t(17, w: FontWeight.w700)),
+        actions: [
+          IconButton(
+            tooltip: 'פתח בדפדפן',
+            icon: const Icon(Icons.open_in_browser),
+            onPressed: () => launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication),
+          ),
+        ],
+        bottom: _progress < 100
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(3),
+                child: LinearProgressIndicator(value: _progress / 100, minHeight: 3, color: AppColors.accent),
+              )
+            : null,
+      ),
+      body: _error != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text('הדף לא נטען: $_error', style: _t(14), textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  LtPrimaryButton(
+                    label: 'פתח בדפדפן',
+                    onPressed: () => launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication),
+                  ),
+                ]),
+              ),
+            )
+          : WebViewWidget(controller: _c),
     );
   }
 }
