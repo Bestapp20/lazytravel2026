@@ -21,8 +21,21 @@ class TicketOffer {
 
 /// Offers for every item of a trip, keyed by item id. Cached server-side (7 days).
 final ticketOffersProvider = FutureProvider.family<Map<String, TicketOffer>, String>((ref, tripId) async {
+  final sb = Supabase.instance.client;
+  Future<FunctionResponse> call() => sb.functions.invoke('tickets', body: {'trip_id': tripId});
   try {
-    final res = await Supabase.instance.client.functions.invoke('tickets', body: {'trip_id': tripId});
+    final exp = sb.auth.currentSession?.expiresAt;
+    if (exp != null && DateTime.fromMillisecondsSinceEpoch(exp * 1000).isBefore(DateTime.now().add(const Duration(minutes: 2)))) {
+      await sb.auth.refreshSession();
+    }
+    FunctionResponse res;
+    try {
+      res = await call();
+    } on FunctionException catch (e) {
+      if (e.status != 401) rethrow;
+      await sb.auth.refreshSession(); // stale JWT: refresh once and retry
+      res = await call();
+    }
     final offers = (res.data is Map ? res.data['offers'] : null) as Map? ?? {};
     return offers.map((k, v) => MapEntry(k as String, TicketOffer(Map<String, dynamic>.from(v as Map))));
   } catch (_) {
