@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -92,6 +92,7 @@ class _FinderFormScreenState extends ConsumerState<FinderFormScreen> {
   }
 
   Future<void> _pickDates() async {
+    FocusScope.of(context).unfocus();
     final now = DateTime.now();
     final r = await showDateRangePicker(
       context: context,

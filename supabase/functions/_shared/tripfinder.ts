@@ -83,11 +83,12 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
     await set({ status: "verifying", progress: 25 });
     const rows: any[] = [];
     let done = 0;
+    const errs: string[] = [];
     await Promise.all(cands.map(async (c) => {
       const k = `lite:${c.lat.toFixed(3)},${c.lng.toFixed(3)}:${c.checkin}:${c.checkout}:${s.adults}:${s.children}:${s.currency}`;
       const rates = await cached<HotelRate[]>(db, k, 30, () => hotelRates({
         lat: c.lat, lng: c.lng, checkin: c.checkin, checkout: c.checkout, adults: s.adults, children: s.children, currency: s.currency,
-      })).catch((e) => { console.error(e); return [] as HotelRate[]; });
+      })).catch((e) => { console.error(e); errs.push(String((e as Error).message ?? e)); return [] as HotelRate[]; });
       for (const r of rates) {
         const total = r.price + (c.flight_price ?? 0);
         if (s.budget && total > Number(s.budget)) continue;
@@ -118,6 +119,7 @@ export async function runSearch(db: SupabaseClient, id: string): Promise<void> {
         (r.hotel_rating ? `, דירוג אורחים ${r.hotel_rating}` : "") + (r.refundable ? ", ביטול חינם" : "");
     });
     if (top.length) await db.from("trip_offers").insert(top);
+    if (!top.length && errs.length === cands.length) throw new Error(`שגיאת ספק מלונות: ${errs[0]}`);
     await set({ status: "done", progress: 100, error: top.length ? null : "לא נמצאו הצעות בתקציב" });
   } catch (e) {
     await set({ status: "error", error: String((e as Error).message ?? e) });
