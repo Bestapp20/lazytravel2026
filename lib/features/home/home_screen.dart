@@ -81,6 +81,28 @@ class HomeScreen extends ConsumerWidget {
                       },
                     ),
                     const SizedBox(height: 18),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                      child: LtCard(
+                        onTap: () => context.push('/finder'),
+                        child: Row(
+                          children: [
+                            const LtIconCircle(icon: Icons.savings_outlined),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('מצא לי טיול', style: GoogleFonts.notoSansHebrew(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textDark)),
+                                  Text('תקציב ותאריכים גמישים, ואנחנו נמצא את הזול ביותר', style: GoogleFonts.notoSansHebrew(fontSize: 12, color: AppColors.textBody)),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_left, color: AppColors.accent),
+                          ],
+                        ),
+                      ),
+                    ),
                     const LtSectionHeader(title: 'לאן בא לך לברוח? ✨'),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),

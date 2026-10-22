@@ -8,6 +8,7 @@ import '../../features/auth/setup_screen.dart';
 import '../../features/documents/document_viewer_screen.dart';
 import '../../features/documents/documents_screen.dart';
 import '../../features/explore/explore_screen.dart';
+import '../../features/finder/finder_screens.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/placeholders/group_screens.dart';
 import '../../features/placeholders/live_mode_screen.dart';
@@ -58,6 +59,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/welcome', builder: (_, _) => const WelcomeScreen()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/home', builder: (_, _) => const HomeScreen()),
+      GoRoute(path: '/finder', builder: (_, _) => const FinderFormScreen()),
+      GoRoute(
+        path: '/finder/:searchId',
+        builder: (_, s) => FinderResultsScreen(searchId: s.pathParameters['searchId']!),
+      ),
+      GoRoute(
+        path: '/finder/:searchId/offer/:offerId',
+        builder: (_, s) => FinderOfferScreen(offerId: s.pathParameters['offerId']!),
+      ),
       GoRoute(path: '/explore', builder: (_, _) => const ExploreScreen()),
       GoRoute(path: '/group', builder: (_, _) => const GroupPlaceholderScreen()),
       GoRoute(path: '/match', builder: (_, _) => const TravelMatchScreen()),
