@@ -57,6 +57,21 @@ class TravelerProfileScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 20),
           LtCard(
+            onTap: () => context.push('/bookings'),
+            child: Row(
+              children: [
+                const Icon(Icons.confirmation_number_outlined, color: AppColors.primaryDark),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text('ההזמנות שלי',
+                      style: GoogleFonts.notoSansHebrew(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textDark)),
+                ),
+                const Icon(Icons.chevron_left, color: AppColors.textBody),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          LtCard(
             child: Text(
               profile?.bio ?? 'כאן יופיע סגנון הטיול שלכם. עריכת פרופיל מלאה תורחב ב‑v2.',
               style: GoogleFonts.notoSansHebrew(color: AppColors.textBody, height: 1.5),

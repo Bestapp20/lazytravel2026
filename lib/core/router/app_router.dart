@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../data/providers.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/auth/setup_screen.dart';
+import '../../features/auth/verify_email_screen.dart';
+import '../../features/bookings/my_bookings_screen.dart';
 import '../../features/documents/document_viewer_screen.dart';
 import '../../features/documents/documents_screen.dart';
 import '../../features/explore/explore_screen.dart';
@@ -47,7 +49,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
       final loc = state.uri.path;
       final loggedIn = ref.read(authRepositoryProvider)?.session != null;
-      const public = ['/welcome', '/login', '/setup'];
+      const public = ['/welcome', '/login', '/setup', '/verify-email'];
       if (!loggedIn && !public.contains(loc)) return '/welcome';
       if (loggedIn && (loc == '/welcome' || loc == '/login' || loc == '/setup')) {
         return '/home';
@@ -72,6 +74,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/group', builder: (_, _) => const GroupPlaceholderScreen()),
       GoRoute(path: '/match', builder: (_, _) => const TravelMatchScreen()),
       GoRoute(path: '/profile', builder: (_, _) => const TravelerProfileScreen()),
+      GoRoute(path: '/bookings', builder: (_, _) => const MyBookingsScreen()),
+      GoRoute(
+        path: '/verify-email',
+        builder: (_, s) => VerifyEmailScreen(email: (s.extra as String?) ?? s.uri.queryParameters['email'] ?? ''),
+      ),
       GoRoute(path: '/wizard/step1', builder: (_, _) => const WizardStep1Screen()),
       GoRoute(path: '/wizard/step2', builder: (_, _) => const WizardStep2Screen()),
       GoRoute(path: '/wizard/step3', builder: (_, _) => const WizardStep3Screen()),

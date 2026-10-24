@@ -9,9 +9,9 @@ function key(): string {
 }
 export const isSandbox = () => key().startsWith("sand");
 
-async function call(url: string, body?: unknown): Promise<any> {
+async function call(url: string, body?: unknown, method?: string): Promise<any> {
   const res = await fetch(url, {
-    method: body ? "POST" : "GET",
+    method: method ?? (body ? "POST" : "GET"),
     headers: { "X-API-Key": key(), "Content-Type": "application/json", accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -172,4 +172,29 @@ export async function flightBook(prebookId: string, transactionId: string): Prom
   const d = await call(`${API}/flights/bookings`, { prebookId, payment: { method: "TRANSACTION_ID", transactionId } });
   const r = d.data?.[0] ?? d.data ?? d;
   return r.booking ?? r;
+}
+
+
+// ───────────── Booking management (status / cancel) ─────────────
+export async function hotelBookingGet(bookingId: string): Promise<any> {
+  const d = await call(`${BOOK}/bookings/${encodeURIComponent(bookingId)}`);
+  return d.data ?? d;
+}
+export async function hotelBookingCancel(bookingId: string): Promise<any> {
+  const d = await call(`${BOOK}/bookings/${encodeURIComponent(bookingId)}`, undefined, "PUT");
+  return d.data ?? d;
+}
+export async function flightBookingGet(bookingId: string): Promise<any> {
+  const d = await call(`${API}/flights/bookings/${encodeURIComponent(bookingId)}`);
+  const r = d.data?.[0] ?? d.data ?? d;
+  return r.booking ?? r;
+}
+/** Cancellation quote (no commitment). */
+export async function flightCancelQuote(bookingId: string): Promise<any> {
+  const d = await call(`${API}/flights/bookings/${encodeURIComponent(bookingId)}/cancellations`);
+  return d.data ?? d;
+}
+export async function flightBookingCancel(bookingId: string): Promise<any> {
+  const d = await call(`${API}/flights/bookings/${encodeURIComponent(bookingId)}/cancellations`, {});
+  return d.data ?? d;
 }

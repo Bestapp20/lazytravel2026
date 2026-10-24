@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/theme/app_assets.dart';
 import '../../core/theme/app_colors.dart';
@@ -39,6 +40,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       await fn();
       if (ok != null && mounted) setState(() => _message = ok);
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      if (e.code == 'email_not_confirmed' || e.message.toLowerCase().contains('not confirmed')) {
+        context.go('/verify-email', extra: _email.text.trim());
+      } else if (e.code == 'invalid_credentials' || e.message.toLowerCase().contains('invalid login')) {
+        setState(() => _message = 'מייל או סיסמה שגויים');
+      } else if (e.code == 'user_already_exists') {
+        setState(() => _message = 'כתובת המייל כבר רשומה. נסו להתחבר.');
+      } else if (e.statusCode == '429' || (e.code ?? '').contains('rate_limit')) {
+        setState(() => _message = 'יותר מדי ניסיונות. נסו שוב בעוד כמה דקות.');
+      } else {
+        setState(() => _message = 'ההתחברות נכשלה: ${e.message}');
+      }
     } catch (e) {
       if (mounted) setState(() => _message = e.toString());
     } finally {
@@ -100,6 +114,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 : () => _run(() async {
                       if (_register) {
                         await auth.signUp(_email.text.trim(), _password.text, _name.text.trim());
+                        if (auth.session == null) {
+                          if (mounted) context.go('/verify-email', extra: _email.text.trim());
+                          return;
+                        }
                       } else {
                         await auth.signInWithPassword(_email.text.trim(), _password.text);
                       }
