@@ -311,7 +311,7 @@ class _GlobePainter extends CustomPainter {
 }
 
 const _skyFill = DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(colors: [AppColors.accentLight, AppColors.primaryDark])));
-Widget _netImg(String url) => Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => _skyFill);
+Widget _netImg(String url) => CachedNetworkImage(imageUrl: url, fit: BoxFit.cover, memCacheWidth: 1080, errorWidget: (_, _, _) => _skyFill);
 
 /// Destination photo (Google Places city photo via places-search), cached per city.
 final Map<String, Future<String?>> _cityPhotoCache = {};

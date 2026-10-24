@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -57,6 +58,12 @@ class _PlacePreviewScreenState extends ConsumerState<PlacePreviewScreen> {
   late int _duration = _kDefaultDuration[widget.itemCategory] ?? 90;
   bool _saving = false;
   bool _hoursOpen = false;
+
+  @override
+  void dispose() {
+    _page.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -171,8 +178,8 @@ class _PlacePreviewScreenState extends ConsumerState<PlacePreviewScreen> {
                       controller: _page,
                       itemCount: photos.length,
                       onPageChanged: (i) => setState(() => _photo = i),
-                      itemBuilder: (_, i) => Image.network(photos[i], fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => Container(color: AppColors.sectionTint)),
+                      itemBuilder: (_, i) => CachedNetworkImage(imageUrl: photos[i], fit: BoxFit.cover, memCacheWidth: 1080,
+                          errorWidget: (_, _, _) => Container(color: AppColors.sectionTint)),
                     ),
                   if (photos.length > 1)
                     Positioned(

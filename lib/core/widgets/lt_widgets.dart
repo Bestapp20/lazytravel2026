@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -405,13 +406,18 @@ class LtNetworkOrAsset extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (url != null && url!.startsWith('http')) {
-      return Image.network(
-        url!,
+      // Disk + memory cache and decode at display size (not full-res) so scrolling
+      // lists of photos stays cheap and nothing re-downloads on every rebuild.
+      final dpr = MediaQuery.devicePixelRatioOf(context);
+      return CachedNetworkImage(
+        imageUrl: url!,
         fit: fit,
         width: width,
         height: height,
-        errorBuilder: (_, _, _) =>
-            Image.asset(asset, fit: fit, width: width, height: height),
+        memCacheWidth: ((width ?? 720) * dpr).round().clamp(64, 1080),
+        fadeInDuration: const Duration(milliseconds: 120),
+        placeholder: (_, _) => Image.asset(asset, fit: fit, width: width, height: height),
+        errorWidget: (_, _, _) => Image.asset(asset, fit: fit, width: width, height: height),
       );
     }
     return Image.asset(asset, fit: fit, width: width, height: height);

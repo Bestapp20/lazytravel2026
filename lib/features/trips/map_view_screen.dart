@@ -31,6 +31,18 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
   int _sheet = 0;
   final _map = MapController();
   String? _fitKey;
+  // Route geometry only depends on the visible points; recomputing the Catmull-Rom
+  // spline + arrow markers on every rebuild (each marker tap / map event) caused jank.
+  String? _geoKey;
+  List<LatLng> _smoothPts = const [];
+  List<Marker> _arrowMarkers = const [];
+  static final _tiles = _TileImages(); // one provider => tiles stay in Flutter's ImageCache
+
+  @override
+  void dispose() {
+    _map.dispose();
+    super.dispose();
+  }
 
   void _fit(List<LatLng> pts) {
     try {
@@ -98,7 +110,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
           setState(() => _sheet = i);
           _map.move(LatLng(it.lat!, it.lng!), _map.camera.zoom);
         },
-        child: CategoryMarker(style: catStyle(it.category, it.placeName), order: i + 1, selected: sel),
+        child: RepaintBoundary(child: CategoryMarker(style: catStyle(it.category, it.placeName), order: i + 1, selected: sel)),
       ),
     );
   }
@@ -126,7 +138,12 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
     final dayCats = <String, CatStyle>{
       for (final i in (day?.items ?? const <TripItem>[]).where((i) => i.lat != null)) catStyle(i.category, i.placeName).key: catStyle(i.category, i.placeName),
     };
-    final smooth = _smooth(pts);
+    if (_geoKey != fitKey) {
+      _geoKey = fitKey;
+      _smoothPts = _smooth(pts);
+      _arrowMarkers = items.length > 1 ? _arrows(pts) : const [];
+    }
+    final smooth = _smoothPts;
 
     return Scaffold(
       body: Stack(
@@ -134,7 +151,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
           // The map canvas is direction-agnostic; RTL ambient direction breaks tile placement.
           Directionality(
             textDirection: TextDirection.ltr,
-            child: FlutterMap(
+            child: RepaintBoundary(child: FlutterMap(
             mapController: _map,
             options: MapOptions(
               initialCenter: center,
@@ -152,9 +169,10 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                 retinaMode: RetinaMode.isHighDensity(context),
                 tileDisplay: const TileDisplay.instantaneous(),
                 userAgentPackageName: 'com.lazytravel.lazy_travel',
-                tileProvider: _TileImages(),
-                errorTileCallback: (tile, error, _) => debugPrint('TILE_ERR ${tile.coordinates} $error'),
-              ),
+                tileProvider: _tiles,
+                keepBuffer: 1,
+                panBuffer: 0,
+                              ),
               const SimpleAttributionWidget(source: Text('Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors', style: TextStyle(fontSize: 9)), alignment: Alignment.topLeft),
               if (items.length > 1)
                 PolylineLayer(
@@ -169,7 +187,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                     ),
                   ],
                 ),
-              if (items.length > 1) MarkerLayer(markers: _arrows(pts)),
+              if (items.length > 1) MarkerLayer(markers: _arrowMarkers),
               MarkerLayer(
                 markers: [
                   for (var i = 0; i < items.length; i++)
@@ -178,7 +196,7 @@ class _MapViewScreenState extends ConsumerState<MapViewScreen> {
                 ],
               ),
             ],
-          ),
+          )),
           ),
           SafeArea(
             child: Padding(
@@ -307,14 +325,6 @@ class _TileImages extends TileProvider {
   @override
   ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
     final url = getTileUrl(coordinates, options);
-    final img = NetworkImage(url, headers: headers);
-    if (_n++ < 4) {
-      debugPrint('TILE_GET $url');
-      img.resolve(ImageConfiguration.empty).addListener(ImageStreamListener(
-          (i, _) => debugPrint('TILE_OK ${i.image.width}x${i.image.height} $url'),
-          onError: (e, _) => debugPrint('TILE_FAIL $e')));
-    }
-    return img;
+    return NetworkImage(url, headers: headers);
   }
-  static int _n = 0;
 }

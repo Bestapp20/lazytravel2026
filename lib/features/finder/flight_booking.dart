@@ -39,6 +39,13 @@ class _SkyHeaderState extends State<_SkyHeader> with SingleTickerProviderStateMi
       child: SizedBox(
         height: widget.height + top,
         child: Stack(children: [
+          // Static backdrop (gradient, sun, dashed route) is painted once in its own layer;
+          // only clouds + plane repaint every frame.
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: CustomPaint(painter: _SkyBackdropPainter(hasRoute: widget.from != null, lift: widget.child != null ? 62 : 0)),
+            ),
+          ),
           Positioned.fill(
             child: RepaintBoundary(
               child: CustomPaint(painter: _SkyPainter(_c, hasRoute: widget.from != null, lift: widget.child != null ? 62 : 0)),
@@ -84,13 +91,6 @@ class _SkyPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size s) {
     final t = anim.value;
-    canvas.drawRect(Offset.zero & s, Paint()
-      ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
-          colors: [AppColors.primaryDark, Color(0xFF237A84), AppColors.accent, AppColors.accentLight]).createShader(Offset.zero & s));
-    // sun glow
-    canvas.drawCircle(Offset(s.width * 0.82, s.height * 0.28), 70, Paint()
-      ..shader = RadialGradient(colors: [Colors.white.withValues(alpha: 0.35), Colors.white.withValues(alpha: 0)])
-          .createShader(Rect.fromCircle(center: Offset(s.width * 0.82, s.height * 0.28), radius: 70)));
     // three cloud layers, each drifting at its own speed
     for (final (y, sc, speed, a) in [(0.30, 0.8, 1.0, 0.20), (0.55, 1.1, 2.0, 0.28), (0.80, 1.4, 3.0, 0.38)]) {
       for (var i = 0; i < 3; i++) {
@@ -110,12 +110,6 @@ class _SkyPainter extends CustomPainter {
     Offset q(double u) => Offset(
         (1 - u) * (1 - u) * a.dx + 2 * (1 - u) * u * ctrl.dx + u * u * b.dx,
         (1 - u) * (1 - u) * a.dy + 2 * (1 - u) * u * ctrl.dy + u * u * b.dy);
-    final dash = Paint()..color = Colors.white.withValues(alpha: 0.7)..strokeWidth = 2..strokeCap = StrokeCap.round;
-    for (var u = 0.0; u < 1; u += 0.04) {
-      canvas.drawLine(q(u), q(math.min(1, u + 0.02)), dash);
-    }
-    canvas.drawCircle(a, 5, Paint()..color = Colors.white);
-    canvas.drawCircle(b, 5, Paint()..color = Colors.white);
     final u = Curves.easeInOut.transform((t * 4) % 1.0);
     final p0 = q(u), p1 = q(math.min(1, u + 0.01));
     _drawPlane(canvas, p0, math.atan2(p1.dy - p0.dy, p1.dx - p0.dx), 1 - (u > 0.92 ? (u - 0.92) / 0.08 : 0));
@@ -148,6 +142,40 @@ class _SkyPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SkyPainter old) => false;
+}
+
+/// Static part of the sky header, painted once (cached by its RepaintBoundary).
+class _SkyBackdropPainter extends CustomPainter {
+  _SkyBackdropPainter({required this.hasRoute, this.lift = 0});
+  final bool hasRoute;
+  final double lift;
+
+  @override
+  void paint(Canvas canvas, Size s) {
+    canvas.drawRect(Offset.zero & s, Paint()
+      ..shader = const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+          colors: [AppColors.primaryDark, Color(0xFF237A84), AppColors.accent, AppColors.accentLight]).createShader(Offset.zero & s));
+    canvas.drawCircle(Offset(s.width * 0.82, s.height * 0.28), 70, Paint()
+      ..shader = RadialGradient(colors: [Colors.white.withValues(alpha: 0.35), Colors.white.withValues(alpha: 0)])
+          .createShader(Rect.fromCircle(center: Offset(s.width * 0.82, s.height * 0.28), radius: 70)));
+    if (!hasRoute) return;
+    final a = Offset(s.width - 60, s.height - 60 - lift), b = Offset(60, s.height - 60 - lift), ctrl = Offset(s.width / 2, s.height * 0.12);
+    Offset q(double u) => Offset(
+        (1 - u) * (1 - u) * a.dx + 2 * (1 - u) * u * ctrl.dx + u * u * b.dx,
+        (1 - u) * (1 - u) * a.dy + 2 * (1 - u) * u * ctrl.dy + u * u * b.dy);
+    final path = Path();
+    for (var u = 0.0; u < 1; u += 0.04) {
+      final p0 = q(u), p1 = q(math.min(1, u + 0.02));
+      path.moveTo(p0.dx, p0.dy);
+      path.lineTo(p1.dx, p1.dy);
+    }
+    canvas.drawPath(path, Paint()..color = Colors.white.withValues(alpha: 0.7)..strokeWidth = 2..strokeCap = StrokeCap.round..style = PaintingStyle.stroke);
+    canvas.drawCircle(a, 5, Paint()..color = Colors.white);
+    canvas.drawCircle(b, 5, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(_SkyBackdropPainter old) => old.hasRoute != hasRoute || old.lift != lift;
 }
 
 /// Steps: passengers → payment → confirmation.
@@ -222,7 +250,7 @@ class _FlightTicket extends StatelessWidget {
               padding: const EdgeInsets.all(6),
               child: logo == null
                   ? const Icon(Icons.flight, color: AppColors.accent)
-                  : Image.network(logo, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.flight, color: AppColors.accent)),
+                  : CachedNetworkImage(imageUrl: logo, fit: BoxFit.contain, memCacheWidth: 240, errorWidget: (_, __, ___) => const Icon(Icons.flight, color: AppColors.accent)),
             ),
             const SizedBox(width: 10),
             Expanded(

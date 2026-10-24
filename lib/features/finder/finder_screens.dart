@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -609,7 +610,7 @@ class _FinderOfferScreenState extends ConsumerState<FinderOfferScreen> {
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
           sliver: SliverList.list(children: [
             if (o['hotel_photo'] != null)
-              ClipRRect(borderRadius: BorderRadius.circular(18), child: Image.network(o['hotel_photo'], height: 190, fit: BoxFit.cover)),
+              ClipRRect(borderRadius: BorderRadius.circular(18), child: CachedNetworkImage(imageUrl: o['hotel_photo'], height: 190, fit: BoxFit.cover, memCacheWidth: 1080)),
             const SizedBox(height: 14),
             if (live != null) ...[
               Row(children: [
